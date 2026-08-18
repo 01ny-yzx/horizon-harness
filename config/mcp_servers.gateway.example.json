@@ -1,0 +1,19 @@
+{
+  "servers": {
+    "agent_gateway": {
+      "transport": "http",
+      "enabled": false,
+      "url": "http://127.0.0.1:8000/mcp/gateway",
+      "headers": {
+        "X-API-Key": "${AGENT_API_KEY}"
+      },
+      "permissions": ["read_only"],
+      "metadata": {
+        "provider": "mcp_gateway",
+        "mode": "remote",
+        "gateway_self": true,
+        "description": "Example only. Do not enable this in the same runtime unless you intentionally want to test remote gateway access."
+      }
+    }
+  }
+}

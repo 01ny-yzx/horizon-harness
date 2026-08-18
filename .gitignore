@@ -1,0 +1,88 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# local MCP configs
+config/mcp_servers.json
+config/mcp_servers.local.json
+config/*.local.json
+!config/*.example.json
+config/mcp.d/*.json
+!config/mcp.d/*.example.json
+!config/mcp.d/.gitkeep
+
+# Python
+.venv/
+.venvs/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.mypy_cache/
+*.tmp
+*.temp
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# logs
+logs/
+*.log
+
+# exports
+dist/
+*.zip
+
+# frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+
+# local stores
+memory_store/*.json
+document_store/*.json
+vector_store/*.json
+workspace_store/**
+cache_store/*.json
+usage_store/*.json
+sandbox_store/**
+*.sandbox.log
+browser_artifacts/**
+*.png
+*.webm
+playwright-report/
+test-results/
+
+# keep docs/placeholders
+!memory_store/
+!memory_store/.gitkeep
+!document_store/
+!document_store/.gitkeep
+!vector_store/
+!vector_store/.gitkeep
+!workspace_store/
+!workspace_store/.gitkeep
+!cache_store/
+!cache_store/.gitkeep
+!usage_store/
+!usage_store/.gitkeep
+!sandbox_store/
+!sandbox_store/.gitkeep
+!browser_artifacts/
+!browser_artifacts/.gitkeep
+
+# legacy local caches
+rag_cache/*.json
+context_cache/*.json
+!rag_cache/
+!rag_cache/.gitkeep
+!context_cache/
+!context_cache/.gitkeep
+.DS_Store
+exports/
+
+.horizon_runtime_validation/

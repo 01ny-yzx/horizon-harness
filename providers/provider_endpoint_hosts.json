@@ -1,0 +1,20 @@
+[
+  {"provider_id":"openai","exact_hosts":["api.openai.com"],"controlled_suffixes":[],"source":"https://platform.openai.com/docs/api-reference","verified_at":"2026-07-19"},
+  {"provider_id":"anthropic","exact_hosts":["api.anthropic.com"],"controlled_suffixes":[],"source":"https://docs.anthropic.com/en/api/getting-started","verified_at":"2026-07-19"},
+  {"provider_id":"google","exact_hosts":["generativelanguage.googleapis.com"],"controlled_suffixes":[],"source":"https://ai.google.dev/api","verified_at":"2026-07-19"},
+  {"provider_id":"google-vertex","exact_hosts":["us-central1-aiplatform.googleapis.com"],"controlled_suffixes":["aiplatform.googleapis.com"],"source":"https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference","reason":"Use verified service hosts; controlled suffixes retain strict DNS label boundaries.","verified_at":"2026-07-19"},
+  {"provider_id":"deepseek","exact_hosts":["api.deepseek.com"],"controlled_suffixes":[],"source":"https://api-docs.deepseek.com","verified_at":"2026-07-19"},
+  {"provider_id":"alibaba","exact_hosts":["dashscope-intl.aliyuncs.com"],"remove_exact_hosts":["dashscope.aliyuncs.com"],"controlled_suffixes":[],"source":"https://www.alibabacloud.com/help/en/model-studio/getting-started/first-api-call-to-qwen","reason":"International DashScope endpoint belongs to the global provider; remove the China endpoint inherited from the upstream record.","verified_at":"2026-07-19"},
+  {"provider_id":"alibaba-cn","exact_hosts":["dashscope.aliyuncs.com"],"controlled_suffixes":[],"source":"https://help.aliyun.com/zh/model-studio/getting-started/first-api-call-to-qwen","reason":"China DashScope endpoint is resolved to the China catalog provider.","verified_at":"2026-07-19"},
+  {"provider_id":"mistral","exact_hosts":["api.mistral.ai"],"controlled_suffixes":[],"source":"https://docs.mistral.ai/api","verified_at":"2026-07-19"},
+  {"provider_id":"xai","exact_hosts":["api.x.ai"],"controlled_suffixes":[],"source":"https://docs.x.ai/docs/api-reference","verified_at":"2026-07-19"},
+  {"provider_id":"openrouter","exact_hosts":["openrouter.ai"],"controlled_suffixes":[],"source":"https://openrouter.ai/docs/api-reference/overview","verified_at":"2026-07-19"},
+  {"provider_id":"xiaomi","exact_hosts":["api.xiaomimimo.com"],"controlled_suffixes":[],"source":"https://platform.xiaomimimo.com","verified_at":"2026-07-19"},
+  {"provider_id":"groq","exact_hosts":["api.groq.com"],"controlled_suffixes":[],"source":"https://console.groq.com/docs/api-reference","verified_at":"2026-07-19"},
+  {"provider_id":"cerebras","exact_hosts":["api.cerebras.ai"],"controlled_suffixes":[],"source":"https://inference-docs.cerebras.ai/api-reference","verified_at":"2026-07-19"},
+  {"provider_id":"perplexity","exact_hosts":["api.perplexity.ai"],"controlled_suffixes":[],"source":"https://docs.perplexity.ai/api-reference","verified_at":"2026-07-19"},
+  {"provider_id":"togetherai","exact_hosts":["api.together.xyz"],"controlled_suffixes":[],"source":"https://docs.together.ai/reference","verified_at":"2026-07-19"},
+  {"provider_id":"deepinfra","exact_hosts":["api.deepinfra.com"],"controlled_suffixes":[],"source":"https://deepinfra.com/docs/advanced/openai_api","verified_at":"2026-07-19"},
+  {"provider_id":"cohere","exact_hosts":["api.cohere.ai"],"controlled_suffixes":[],"source":"https://docs.cohere.com/reference/about","verified_at":"2026-07-19"},
+  {"provider_id":"azure","exact_hosts":[],"controlled_suffixes":["openai.azure.com","cognitiveservices.azure.com"],"source":"https://learn.microsoft.com/azure/ai-services/openai/reference","verified_at":"2026-07-19"}
+]

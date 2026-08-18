@@ -1,0 +1,12 @@
+{
+  "servers": [
+    {
+      "name": "example",
+      "transport": "stdio",
+      "command": "example-mcp-server",
+      "args": [],
+      "enabled": false,
+      "permissions": ["read_only"]
+    }
+  ]
+}

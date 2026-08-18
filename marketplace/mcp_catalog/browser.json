@@ -1,0 +1,43 @@
+{
+  "id": "browser",
+  "server_name": "browser",
+  "display_name": "Browser MCP",
+  "description": "Use local Playwright browser automation through MCP for public HTTP/HTTPS pages, reliable structured page text extraction, deterministic summaries, screenshots saved as paths, link extraction, friendly structured errors, and careful non-sensitive interactions.",
+  "category": "browser",
+  "status": "available",
+  "official": true,
+  "version": "1.0.0",
+  "tags": ["browser", "playwright", "automation", "web", "local"],
+  "transport": "stdio",
+  "runtime": {
+    "type": "python_module",
+    "requires": ["python", "playwright", "chromium"]
+  },
+  "permissions": {
+    "default": ["read_only", "network"],
+    "available": ["read_only", "network"]
+  },
+  "resource_scope": {
+    "type": "browser",
+    "description": "Public HTTP/HTTPS browser automation with network read-only access. Localhost, private IP, file URLs, browser internal URLs, persistent sessions, and sensitive form fields are blocked by BrowserPolicy. Policy, DNS, network, timeout, dependency, launch, screenshot, and extraction failures return stable error_code, message, suggestion, category, and retryable fields. Screenshots are saved as paths only; cookies, storage, secrets, API keys, tokens, traceback, and screenshot bytes are not returned."
+  },
+  "env": [],
+  "install_template": {
+    "command": "python",
+    "args": ["-m", "mcp_servers.browser"],
+    "env": {},
+    "metadata": {
+      "provider": "browser",
+      "mode": "local",
+      "description": "Browser MCP installed from marketplace catalog. It wraps the existing local Playwright BrowserManager through MCP.",
+      "tool_aliases": {
+        "get_browser_status": "get_browser_status",
+        "browser_extract_text": "browser_extract_text",
+        "browser_screenshot": "browser_screenshot",
+        "browser_list_links": "browser_list_links",
+        "browser_click_and_extract": "browser_click_and_extract",
+        "browser_fill_form": "browser_fill_form"
+      }
+    }
+  }
+}

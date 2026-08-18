@@ -1,0 +1,118 @@
+{
+  "id": "database",
+  "server_name": "database",
+  "display_name": "Database MCP",
+  "description": "Read-only SQLite and MySQL database inspection, connection diagnostics, safe config preview, truncated query result UX, and SELECT query MCP plugin.",
+  "category": "database",
+  "status": "available",
+  "official": true,
+  "version": "1.0.0",
+  "tags": ["database", "sqlite", "mysql", "sql", "read-only", "local"],
+  "transport": "stdio",
+  "runtime": {
+    "type": "python_module",
+    "requires": ["python", "sqlite3"]
+  },
+  "permissions": {
+    "default": ["read_only"],
+    "available": ["read_only"]
+  },
+  "resource_scope": {
+    "type": "database",
+    "description": "Read-only SQLite and MySQL database access. SQLite is the default driver. MySQL is enabled through DATABASE_MCP_DRIVER=mysql and MySQL env vars. No write SQL is allowed, dangerous SQL is blocked, query results may be truncated, connection diagnostics and safe config previews are supported, and credentials are not shown in normal responses."
+  },
+  "env": [
+    {
+      "name": "DATABASE_MCP_DRIVER",
+      "description": "Database driver. Defaults to sqlite. Supported values: sqlite, mysql.",
+      "placeholder": "sqlite",
+      "sensitive": false,
+      "required": false
+    },
+    {
+      "name": "DATABASE_MCP_SQLITE_PATH",
+      "description": "Path to an existing SQLite database file. The MCP server opens it in read-only mode.",
+      "placeholder": "${DATABASE_MCP_SQLITE_PATH}",
+      "sensitive": false,
+      "required": false
+    },
+    {
+      "name": "DATABASE_MCP_MYSQL_HOST",
+      "description": "MySQL host for read-only access. Required when DATABASE_MCP_DRIVER=mysql.",
+      "placeholder": "${DATABASE_MCP_MYSQL_HOST}",
+      "sensitive": false,
+      "required": false
+    },
+    {
+      "name": "DATABASE_MCP_MYSQL_PORT",
+      "description": "MySQL port. Defaults to 3306.",
+      "placeholder": "3306",
+      "sensitive": false,
+      "required": false
+    },
+    {
+      "name": "DATABASE_MCP_MYSQL_USER",
+      "description": "MySQL user for read-only access. Required when DATABASE_MCP_DRIVER=mysql.",
+      "placeholder": "${DATABASE_MCP_MYSQL_USER}",
+      "sensitive": false,
+      "required": false
+    },
+    {
+      "name": "DATABASE_MCP_MYSQL_PASSWORD",
+      "description": "MySQL password. Marked sensitive; the value is never shown in normal responses, status, connection diagnostics, or safe config previews.",
+      "placeholder": "${DATABASE_MCP_MYSQL_PASSWORD}",
+      "sensitive": true,
+      "required": false
+    },
+    {
+      "name": "DATABASE_MCP_MYSQL_DATABASE",
+      "description": "MySQL database/schema name. Required when DATABASE_MCP_DRIVER=mysql.",
+      "placeholder": "${DATABASE_MCP_MYSQL_DATABASE}",
+      "sensitive": false,
+      "required": false
+    },
+    {
+      "name": "DATABASE_MCP_MYSQL_CHARSET",
+      "description": "MySQL charset. Defaults to utf8mb4.",
+      "placeholder": "utf8mb4",
+      "sensitive": false,
+      "required": false
+    },
+    {
+      "name": "DATABASE_MCP_MYSQL_CONNECT_TIMEOUT",
+      "description": "MySQL connection timeout in seconds. Defaults to 5.",
+      "placeholder": "5",
+      "sensitive": false,
+      "required": false
+    },
+    {
+      "name": "DATABASE_MCP_MAX_ROWS",
+      "description": "Maximum rows returned by SELECT/sample queries. Defaults to 100 and cannot exceed the server limit. Query result rows and long cell values may be truncated for performance and safety.",
+      "placeholder": "100",
+      "sensitive": false,
+      "required": false
+    }
+  ],
+  "install_template": {
+    "command": "python",
+    "args": ["-m", "mcp_servers.database"],
+    "env": {
+      "DATABASE_MCP_SQLITE_PATH": "${DATABASE_MCP_SQLITE_PATH}"
+    },
+    "metadata": {
+      "provider": "database",
+      "mode": "local",
+      "driver": "sqlite",
+      "description": "Database MCP installed from marketplace catalog. It provides safe read-only SQLite/MySQL schema inspection, connection diagnostics, safe config previews, and truncated SELECT query results. MySQL requires PyMySQL. Dangerous SQL is blocked, no write SQL is allowed, and credentials are redacted.",
+      "tool_aliases": {
+        "get_database_status": "get_database_status",
+        "database_test_connection": "database_test_connection",
+        "database_get_connection_config": "database_get_connection_config",
+        "database_list_tables": "database_list_tables",
+        "database_describe_table": "database_describe_table",
+        "database_select_query": "database_select_query",
+        "database_get_sample_rows": "database_get_sample_rows"
+      }
+    }
+  }
+}

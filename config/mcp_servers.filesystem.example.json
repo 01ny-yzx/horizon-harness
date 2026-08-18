@@ -1,0 +1,24 @@
+{
+  "servers": [
+    {
+      "name": "filesystem",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "."
+      ],
+      "enabled": false,
+      "permissions": [
+        "read_only"
+      ],
+      "metadata": {
+        "allowed_roots": [
+          "."
+        ],
+        "description": "Read-only filesystem MCP example. Enable only after reviewing allowed roots. On Windows, use command=cmd with args=[\"/c\",\"npx\",...] if direct npx is not available."
+      }
+    }
+  ]
+}

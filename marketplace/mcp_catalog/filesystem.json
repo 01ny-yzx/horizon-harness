@@ -1,0 +1,44 @@
+{
+  "id": "filesystem",
+  "server_name": "filesystem",
+  "display_name": "Filesystem MCP",
+  "description": "Read files and directories from explicitly allowed local roots through MCP.",
+  "category": "local",
+  "status": "available",
+  "official": true,
+  "version": "1.0.0",
+  "tags": ["filesystem", "files", "local", "read_only"],
+  "transport": "stdio",
+  "runtime": {
+    "type": "npx",
+    "requires": ["node", "npx"]
+  },
+  "permissions": {
+    "default": ["read_only"],
+    "available": ["read_only", "write"]
+  },
+  "env": [
+    {
+      "name": "MCP_FILESYSTEM_ROOT",
+      "required": true,
+      "sensitive": false,
+      "placeholder": "${MCP_FILESYSTEM_ROOT}",
+      "description": "Allowed root directory for the filesystem MCP server."
+    }
+  ],
+  "install_template": {
+    "command": "npx",
+    "args": [
+      "-y",
+      "@modelcontextprotocol/server-filesystem",
+      "${MCP_FILESYSTEM_ROOT}"
+    ],
+    "env": {
+      "MCP_FILESYSTEM_ROOT": "${MCP_FILESYSTEM_ROOT}"
+    },
+    "metadata": {
+      "provider": "filesystem",
+      "description": "Filesystem MCP installed from marketplace catalog. Review allowed root before enabling."
+    }
+  }
+}
