@@ -16,6 +16,7 @@ from core.unicode_safety import sanitize_unicode
 
 TraceEventType = Literal[
     "task_start",
+    "request_guidance_resolved",
     "initial_tool_surface",
     "initial_agent_turn",
     "initial_agent_turn_failure",
@@ -43,7 +44,6 @@ TraceEventType = Literal[
     "build_step_contract_unexpected_tool_warning",
     "simple_fast_path",
     "tool_scope_budget",
-    "observation_pruning",
     "runtime_state",
     "terminal_finalization_adoption",
     "terminal_finalization_recovery",
@@ -86,6 +86,7 @@ STRUCTURED_EVENT_TYPES = frozenset(
         "performance_stage",
         "runtime_metrics",
         "initial_tool_surface",
+        "request_guidance_resolved",
         "initial_agent_turn",
         "initial_agent_turn_failure",
         "initial_tool_batch_complete",

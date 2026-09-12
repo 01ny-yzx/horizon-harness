@@ -69,14 +69,30 @@ class ContextGroup:
     kind: str
 
 
-PRUNED_FAILURE_REASONS = {
-    "covered_failed_context_read",
-    "covered_failed_observation",
-    "duplicate_failed_observation",
-    "duplicate_failed_source_observation",
-}
-DOCUMENT_TOOLS = {"read_document", "load_document", "load_documents_from_directory"}
 PATH_KEYS = ("target", "path", "output_path", "url", "command")
+TOOL_EXECUTION_FACT_KEYS = frozenset(
+    {
+        "observation_id",
+        "call_id",
+        "tool_call_id",
+        "provider_call_id",
+        "tool",
+        "tool_name",
+        "canonical_name",
+        "executable_name",
+        "success",
+        "status",
+        "error_code",
+        "policy_code",
+        "blocked_by",
+        "recoverable",
+        "recovery_reason",
+        "real_execution",
+        "stopped_before_execution",
+        "grant_status",
+        "execution_status",
+    }
+)
 
 
 def context_budget_config_from_settings(settings: Any) -> ContextBudgetConfig:
@@ -533,89 +549,6 @@ def group_protocol_messages(messages: list[dict[str, Any]]) -> list[ContextGroup
     return groups
 
 
-def _apply_request_level_prune(
-    messages: list[dict[str, Any]],
-    *,
-    runtime_lane: str,
-    task_state: Any,
-    tools: list[dict[str, Any]] | None,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Prune stale tool outputs before compact decisions without deleting protocol messages."""
-
-    tool_chars = _json_chars(tools or [])
-    pre_chars = _messages_chars(messages) + tool_chars
-    available_tools = _tool_names_from_schemas(tools or [])
-    groups = group_protocol_messages(messages)
-    success_targets = _success_targets(groups)
-    metadata = getattr(task_state, "metadata", None)
-    metadata = metadata if isinstance(metadata, dict) else {}
-    result: list[dict[str, Any]] = []
-    pruned_count = 0
-    unavailable_count = 0
-    covered_count = 0
-    for message in messages:
-        item = dict(message)
-        if item.get("role") != "tool":
-            result.append(item)
-            continue
-        payload = _parse_payload(str(item.get("content") or ""))
-        tool_name = str(item.get("name") or (payload or {}).get("tool") or "").rsplit(".", 1)[-1]
-        if payload is None or _payload_success(payload):
-            result.append(item)
-            continue
-        prune_reason = ""
-        if available_tools and tool_name and tool_name not in available_tools:
-            prune_reason = "request_level_stale_or_unavailable_failure"
-            unavailable_count += 1
-        elif _is_pruned_or_covered_failure(payload, tool_name, success_targets):
-            prune_reason = "request_level_stale_or_covered_failure"
-            covered_count += 1
-        elif _explore_read_file_primary(task_state, metadata) and tool_name in DOCUMENT_TOOLS:
-            prune_reason = "request_level_stale_or_unavailable_failure"
-            unavailable_count += 1
-        if prune_reason:
-            item["content"] = _placeholder_tool_failure(prune_reason)
-            pruned_count += 1
-        result.append(item)
-    post_chars = _messages_chars(result) + tool_chars
-    return result, {
-        "request_level_prune_applied": True,
-        "request_level_pruned_tool_message_count": pruned_count,
-        "request_level_unavailable_failure_pruned_count": unavailable_count,
-        "request_level_covered_failure_pruned_count": covered_count,
-        "pre_prune_chars": pre_chars,
-        "post_prune_chars": post_chars,
-        "available_tool_names": sorted(available_tools),
-        **_runtime_state_budget_metadata(task_state),
-    }
-
-
-def _tool_names_from_schemas(tools: list[dict[str, Any]]) -> set[str]:
-    names: set[str] = set()
-    for schema in tools:
-        if not isinstance(schema, dict):
-            continue
-        function = schema.get("function") if isinstance(schema.get("function"), dict) else {}
-        name = schema.get("name") or function.get("name")
-        if name:
-            names.add(str(name).rsplit(".", 1)[-1])
-    return names
-
-
-def _placeholder_tool_failure(reason: str) -> str:
-    return json.dumps(
-        {
-            "success": False,
-            "status": "failed",
-            "pruned": True,
-            "pruning_reason": reason,
-            "message": "Stale or unavailable failed observation omitted from model context.",
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-
-
 def _runtime_state_budget_metadata(task_state: Any) -> dict[str, Any]:
     metadata = getattr(task_state, "metadata", None)
     metadata = metadata if isinstance(metadata, dict) else {}
@@ -639,22 +572,6 @@ def _runtime_state_budget_metadata(task_state: Any) -> dict[str, Any]:
     return result
 
 
-def _explore_read_file_primary(task_state: Any, metadata: dict[str, Any]) -> bool:
-    primary_capability = str(metadata.get("primary_capability") or metadata.get("tool_plan_primary_capability") or "").lower()
-    primary_tool = str(metadata.get("primary_tool") or metadata.get("tool_plan_primary_tool") or "").rsplit(".", 1)[-1]
-    if not primary_capability and not primary_tool:
-        plan = getattr(task_state, "tool_plan", None)
-        if isinstance(plan, dict):
-            primary_capability = str(plan.get("primary_capability") or "").lower()
-            primary_tool = str(plan.get("primary_tool") or "").rsplit(".", 1)[-1]
-        profile = getattr(task_state, "task_profile", None)
-        if not primary_capability and profile is not None:
-            primary_capability = str(getattr(profile, "primary_capability", "") or "").lower()
-        if not primary_tool and profile is not None:
-            primary_tool = str(getattr(profile, "primary_tool", "") or "").rsplit(".", 1)[-1]
-    return primary_capability == "file_read" or primary_tool == "read_file"
-
-
 def _split_current_task_tail(groups: list[ContextGroup]) -> tuple[list[ContextGroup], list[ContextGroup]]:
     start = len(groups)
     for index in range(len(groups) - 1, -1, -1):
@@ -662,47 +579,6 @@ def _split_current_task_tail(groups: list[ContextGroup]) -> tuple[list[ContextGr
             start = index
             break
     return groups[:start], groups[start:]
-
-
-def _trim_current_tail_for_satisfied_file_read(groups: list[ContextGroup]) -> tuple[list[ContextGroup], list[ContextGroup]]:
-    if not groups:
-        return groups, []
-    kept: list[ContextGroup] = []
-    demoted: list[ContextGroup] = []
-    user_kept = False
-    read_file_kept = False
-    for group in groups:
-        has_user = any(message.get("role") == "user" for message in group.messages)
-        if has_user and not user_kept:
-            kept.append(group)
-            user_kept = True
-            continue
-        if group.kind == "tool_chain" and _group_has_successful_read_file(group) and not read_file_kept:
-            kept.append(group)
-            read_file_kept = True
-            continue
-        demoted.append(group)
-    return kept, demoted
-
-
-def _group_has_successful_read_file(group: ContextGroup) -> bool:
-    for message in group.messages:
-        if message.get("role") != "tool":
-            continue
-        payload = _parse_payload(str(message.get("content") or ""))
-        if not payload:
-            continue
-        tool_name = str(message.get("name") or payload.get("tool") or "")
-        if tool_name == "read_file" and _payload_success(payload):
-            return True
-    return False
-
-
-def _explore_file_read_satisfied(task_state: Any) -> bool:
-    metadata = getattr(task_state, "metadata", None)
-    return isinstance(metadata, dict) and (
-        metadata.get("local_file_read_satisfied") is True or metadata.get("explore_file_read_satisfied") is True
-    )
 
 
 def _tail_by_message_count(groups: list[ContextGroup], max_messages: int) -> list[ContextGroup]:
@@ -737,7 +613,13 @@ def _is_critical_system_message(message: dict[str, Any]) -> bool:
         content.startswith("You are Horizon")
         or content.startswith("You are an AI")
         or "simple chat mode" in content
-        or note_type in {"task_state", "tool_schema_scope", "runtime_state", "context_compact_summary"}
+        or note_type in {
+            "task_state",
+            "tool_schema_scope",
+            "runtime_state",
+            "context_compact_summary",
+            "request_guidance",
+        }
     )
 
 
@@ -762,7 +644,6 @@ def _build_compact_summary(
     max_chars: int | None = None,
     summary_metadata: dict[str, Any] | None = None,
 ) -> str:
-    success_targets = _success_targets(all_groups)
     users: list[str] = []
     assistants: list[str] = []
     tools: list[str] = []
@@ -779,13 +660,13 @@ def _build_compact_summary(
             elif role == "assistant" and content:
                 assistants.append(_one_line(content, 220))
             elif role == "tool":
-                summary = _summarize_tool_message(message, success_targets=success_targets)
+                summary = _summarize_tool_message(message)
                 if summary:
                     tools.append(summary)
                 recovery = _tool_recovery_record(message)
                 if recovery:
                     recovery_records.append(recovery)
-                _collect_paths_and_sources(content, files, sources, failures, success_targets=success_targets)
+                _collect_paths_and_sources(content, files, sources, failures)
     for attr in ("modified_files", "output_files"):
         for item in getattr(task_state, attr, []) or []:
             files.append(str(item))
@@ -837,47 +718,11 @@ def _tool_recovery_record(message: dict[str, Any]) -> dict[str, Any]:
     return build_tool_result_card(payload)
 
 
-def _current_task_success_summary(groups: list[ContextGroup], *, lane: str) -> list[str]:
-    if lane not in {"explore", "research"}:
-        return []
-    current_user = ""
-    read_file_target = ""
-    read_file_preview = ""
-    for group in groups:
-        for message in group.messages:
-            if message.get("role") == "user":
-                current_user = _one_line(str(message.get("content") or ""), 220)
-            if message.get("role") != "tool":
-                continue
-            payload = _parse_payload(str(message.get("content") or ""))
-            payload_tool = str(payload.get("tool") or "") if payload else ""
-            if str(message.get("name") or payload_tool) != "read_file":
-                continue
-            if not payload or not _payload_success(payload):
-                continue
-            data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
-            read_file_target = _target_from_payload(payload)
-            read_file_preview = _one_line(str(data.get("content") or data.get("text") or payload.get("content") or payload.get("text") or ""), 260)
-    if not read_file_target:
-        return []
-    lines = [
-        f"- current_task: {current_user or 'read and summarize the requested file'}",
-        f"- current_successful_result: read_file successfully read {read_file_target}.",
-        "- current_instruction: Use the read_file content as the authoritative result.",
-        "- current_instruction: Do not report older covered read/search failures.",
-    ]
-    if read_file_preview:
-        lines.append(f"- current_read_file_preview: {read_file_preview}")
-    return lines
-
-
-def _summarize_tool_message(message: dict[str, Any], *, success_targets: set[str]) -> str:
+def _summarize_tool_message(message: dict[str, Any]) -> str:
     name = str(message.get("name") or "tool")
     payload = _parse_payload(str(message.get("content") or ""))
     if payload is None:
         return _one_line(f"{name}: {message.get('content') or ''}", 220)
-    if _is_pruned_or_covered_failure(payload, name, success_targets):
-        return ""
     data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
     success = _payload_success(payload)
     status = payload.get("status") or data.get("status") or ("success" if success else "failed")
@@ -899,14 +744,9 @@ def _collect_paths_and_sources(
     files: list[str],
     sources: list[str],
     failures: list[str],
-    *,
-    success_targets: set[str],
 ) -> None:
     payload = _parse_payload(content)
     if payload is None:
-        return
-    tool_name = str(payload.get("tool") or "")
-    if _is_pruned_or_covered_failure(payload, tool_name, success_targets):
         return
     data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
     target = _target_from_payload(payload)
@@ -917,50 +757,6 @@ def _collect_paths_and_sources(
         sources.append(str(url))
     if payload.get("success") is False:
         failures.append(_one_line(str(payload.get("error") or payload.get("message") or payload.get("error_code") or ""), 180))
-
-
-def _is_pruned_or_covered_failure(payload: dict[str, Any], tool_name: str, success_targets: set[str] | None = None) -> bool:
-    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
-    reason = str(payload.get("pruning_reason") or data.get("pruning_reason") or "")
-    message = str(payload.get("message") or payload.get("error") or "")
-    target = _target_from_payload(payload)
-    success_targets = success_targets or set()
-    if payload.get("pruned") is True:
-        return True
-    if reason in PRUNED_FAILURE_REASONS:
-        return True
-    if any(text in message for text in ("Intermediate failed read omitted", "Failed observation omitted", "Repeated failed observation omitted")):
-        return True
-    if target and _target_covered(target, success_targets) and not _payload_success(payload):
-        return True
-    if success_targets and not _payload_success(payload) and tool_name == "read_file" and target and not _target_covered(target, success_targets):
-        return True
-    if tool_name in DOCUMENT_TOOLS and target.endswith(".py"):
-        return True
-    if tool_name == "search_text" and _looks_like_file_path(target):
-        error_text = " ".join(str(item or "") for item in (payload.get("error"), payload.get("message"), data.get("error"), data.get("message")))
-        if "不是目录" in error_text or "not a directory" in error_text.lower():
-            return True
-    return False
-
-
-def _success_targets(groups: list[ContextGroup]) -> set[str]:
-    targets: set[str] = set()
-    successful_file_reads: set[str] = set()
-    for group in groups:
-        for message in group.messages:
-            if message.get("role") != "tool":
-                continue
-            payload = _parse_payload(str(message.get("content") or ""))
-            if not payload or not _payload_success(payload):
-                continue
-            target = _target_from_payload(payload)
-            if target:
-                targets.add(target)
-            if str(message.get("name") or payload.get("tool") or "") == "read_file" and target:
-                successful_file_reads.add(target)
-    targets.update(successful_file_reads)
-    return targets
 
 
 def _drop_old_non_current_groups(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -995,28 +791,10 @@ def _truncate_noncritical_system_notes(messages: list[dict[str, Any]], limit: in
 def _prune_tool_outputs(messages: list[dict[str, Any]], limit: int, *, protected_limit: int | None = None) -> tuple[list[dict[str, Any]], int]:
     result: list[dict[str, Any]] = []
     pruned = 0
-    success_targets = _success_targets(group_protocol_messages(messages))
     for message in messages:
         item = dict(message)
         if item.get("role") == "tool":
             content = str(item.get("content") or "")
-            payload = _parse_payload(content)
-            tool_name = str(item.get("name") or (payload or {}).get("tool") or "")
-            if payload is not None and _is_pruned_or_covered_failure(payload, tool_name, success_targets):
-                item["content"] = json.dumps(
-                    {
-                        "success": False,
-                        "status": "failed",
-                        "pruned": True,
-                        "pruning_reason": "current_tail_covered_failure",
-                        "message": "Covered or irrelevant failed observation omitted from model context.",
-                    },
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                )
-                pruned += 1
-                result.append(item)
-                continue
             tool_limit = protected_limit if protected_limit and _is_protected_tool_message(item) else limit
             compact = _compact_tool_content(content, tool_limit)
             if compact != content:
@@ -1050,7 +828,10 @@ def _compact_value(value: Any, limit: int) -> Any:
     if isinstance(value, dict):
         result = {}
         for key, item in value.items():
-            if key in {"provider_metadata", "_observation_pruning_state"}:
+            if key == "provider_metadata":
+                continue
+            if key in TOOL_EXECUTION_FACT_KEYS:
+                result[key] = item
                 continue
             if key in {"stdout", "stderr", "text", "content", "body", "html", "markdown"} and isinstance(item, str):
                 result[key] = _truncate(item, limit)
@@ -1081,20 +862,8 @@ def _payload_success(payload: dict[str, Any]) -> bool:
     return payload.get("success") is True or str(payload.get("status") or "").strip().lower() == "success"
 
 
-def _target_covered(target: str, success_targets: set[str]) -> bool:
-    if target in success_targets:
-        return True
-    target_base = target.rsplit("/", 1)[-1]
-    return bool(target_base and any(item.rsplit("/", 1)[-1] == target_base for item in success_targets))
-
-
 def _looks_like_path(value: str) -> bool:
     return bool(value and ("/" in value or "." in value))
-
-
-def _looks_like_file_path(value: str) -> bool:
-    tail = value.rsplit("/", 1)[-1]
-    return bool("." in tail and not value.endswith("/"))
 
 
 def _flatten_groups(groups: list[ContextGroup]) -> list[dict[str, Any]]:

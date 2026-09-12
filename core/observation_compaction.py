@@ -106,6 +106,15 @@ def compact_tool_result_for_model(
     else:
         summary, content_ref, dropped, strategy, reason = _compact_generic(payload, metadata, max_preview_chars)
 
+    nearby_instructions = _nearby_instructions(payload, metadata)
+    if nearby_instructions:
+        summary["nearby_instructions"] = nearby_instructions
+        summary["loaded_instruction_paths"] = [
+            str(item.get("path") or "")
+            for item in nearby_instructions
+            if isinstance(item, dict) and str(item.get("path") or "")
+        ]
+
     summary.setdefault("tool_name", tool or tool_name)
     summary.setdefault("success", bool(success or payload.get("success") is True))
     summary.setdefault("status", str(payload.get("status") or ("success" if summary.get("success") else "failed")))
@@ -459,6 +468,9 @@ def _base_summary(payload: dict[str, Any], metadata: dict[str, Any]) -> dict[str
         summary["error"] = _preview(str(payload.get("error") or data.get("message") or ""), DEFAULT_PREVIEW_CHARS)
     if payload.get("error_code") or data.get("error_code") or data.get("code"):
         summary["error_code"] = str(payload.get("error_code") or data.get("error_code") or data.get("code") or "")
+    if payload.get("artifact_error_code") or data.get("artifact_error_code"):
+        summary["artifact_error_code"] = str(payload.get("artifact_error_code") or data.get("artifact_error_code") or "")
+        summary["artifact_available"] = False
     if payload.get("recoverable") is True or data.get("recoverable") is True or result_mapping.get("recoverable") is True:
         summary["recoverable"] = True
     recovery_reason = payload.get("recovery_reason") or data.get("recovery_reason") or result_mapping.get("recovery_reason")
@@ -524,6 +536,40 @@ def _unique_strings(values: Any) -> list[str]:
         text = str(value or "")
         if text and text not in result:
             result.append(text)
+    return result
+
+
+def _nearby_instructions(
+    payload: dict[str, Any],
+    metadata: dict[str, Any],
+) -> list[dict[str, str]]:
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    values = data.get("nearby_instructions")
+    if not isinstance(values, list):
+        values = payload.get("nearby_instructions")
+    loaded = metadata.get("loaded_instruction_paths")
+    loaded_paths = {
+        str(value)
+        for value in (loaded if isinstance(loaded, list) else [])
+        if isinstance(value, str) and value
+    }
+    result: list[dict[str, str]] = []
+    for item in (values if isinstance(values, list) else []):
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "")
+        content = str(item.get("content") or "")
+        applies_to = str(item.get("applies_to") or "")
+        if not path or not content or (loaded_paths and path not in loaded_paths):
+            continue
+        result.append(
+            {
+                "path": path,
+                "content": content,
+                "applies_to": applies_to,
+                "discovered_by": "file_read",
+            }
+        )
     return result
 
 
@@ -647,7 +693,7 @@ def _validated_artifact_payload(payload: dict[str, Any]) -> dict[str, Any]:
     tool = _base_tool(_tool_name(result, None))
     if tool in {"read_file", "read_document"} and not _payload_completed_success(result):
         for prefix in ("content", "stdout", "stderr"):
-            for field in ("ref", "chars", "bytes", "sha256", "externalized"):
+            for field in ("ref", "chars", "bytes", "sha256", "externalized", "ref_reused"):
                 result.pop(f"{prefix}_{field}", None)
                 mapping.pop(f"{prefix}_{field}", None)
         if isinstance(data, dict):
@@ -669,12 +715,19 @@ def _validated_artifact_payload(payload: dict[str, Any]) -> dict[str, Any]:
             _optional_int(result.get("content_bytes") if "content_bytes" in result else mapping.get("content_bytes")) if name == "content" else _optional_int(mapping.get(f"{name}_bytes")),
         )
         if not validated.valid:
-            for field in ("ref", "chars", "bytes", "sha256", "externalized"):
+            for field in ("ref", "chars", "bytes", "sha256", "externalized", "ref_reused"):
                 mapping.pop(f"{prefix}_{field}", None)
                 if name == "content":
                     result.pop(f"content_{field}", None)
-            result.update({"success": False, "status": "error", "error_code": validated.error_code})
-            mapping["artifact_error_code"] = validated.error_code
+            artifact_error_code = str(
+                result.get("artifact_error_code")
+                or mapping.get("artifact_error_code")
+                or validated.error_code
+            )
+            result["artifact_error_code"] = artifact_error_code
+            result["artifact_available"] = False
+            mapping["artifact_error_code"] = artifact_error_code
+            mapping["artifact_available"] = False
             continue
         values = {
             f"{prefix}_ref": validated.ref,

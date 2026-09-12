@@ -205,9 +205,70 @@ def test_artifact_validation_and_replay(workspace: Path) -> None:
         "tool": "generic_tool",
         "data": {"content_ref": str(artifact.parent / "missing-card.txt"), "preview": "untrusted"},
     })
-    assert invalid_card["success"] is False
-    assert invalid_card["error_code"] == "replay_artifact_missing"
+    assert invalid_card["success"] is True
+    assert invalid_card["status"] == "success"
+    assert not invalid_card.get("error_code")
+    assert invalid_card["artifact_error_code"] == "replay_artifact_missing"
+    assert invalid_card["artifact_available"] is False
     assert not invalid_card.get("content_ref")
+
+    hash_mismatch = build_tool_result_card({
+        "success": True,
+        "status": "success",
+        "tool": "generic_tool",
+        "content_ref": str(artifact),
+        "content_sha256": "0" * 64,
+        "data": {"content_ref": str(artifact), "content_sha256": "0" * 64, "preview": "safe preview"},
+    })
+    assert hash_mismatch["success"] is True and hash_mismatch["status"] == "success"
+    assert hash_mismatch["artifact_error_code"] == "replay_artifact_hash_mismatch"
+    assert not hash_mismatch.get("content_ref") and not hash_mismatch.get("error_code")
+
+    stream_card = build_tool_result_card({
+        "success": True,
+        "status": "success",
+        "tool": "sandbox_exec",
+        "data": {
+            "command": "true",
+            "exit_code": 0,
+            "stdout": "stdout preview",
+            "stderr": "stderr preview",
+            "stdout_ref": str(artifact.parent / "missing-stdout.txt"),
+            "stderr_ref": str(artifact.parent / "missing-stderr.txt"),
+        },
+    })
+    assert stream_card["success"] is True and stream_card["status"] == "success"
+    assert stream_card["exit_code"] == 0
+    assert stream_card["artifact_error_code"] == "replay_artifact_missing"
+    assert not stream_card.get("stdout_ref") and not stream_card.get("stderr_ref")
+    assert stream_card["stdout_preview"] == "stdout preview"
+    assert stream_card["stderr_preview"] == "stderr preview"
+
+    invalid_stderr = build_tool_result_card({
+        "success": True,
+        "status": "success",
+        "tool": "sandbox_exec",
+        "data": {"command": "true", "exit_code": 0, "stderr": "preview", "stderr_ref": "/etc/hosts"},
+    })
+    assert invalid_stderr["success"] is True and invalid_stderr["status"] == "success"
+    assert invalid_stderr["artifact_error_code"] == "replay_artifact_invalid_ref"
+    assert not invalid_stderr.get("stderr_ref")
+
+    failed_with_bad_artifact = build_tool_result_card({
+        "success": False,
+        "status": "failed",
+        "tool": "generic_tool",
+        "error": "timed out",
+        "error_code": "timeout",
+        "data": {"content_ref": str(artifact.parent / "missing-failed.txt")},
+    })
+    assert failed_with_bad_artifact["success"] is False
+    assert failed_with_bad_artifact["status"] == "failed"
+    assert failed_with_bad_artifact["error_code"] == "timeout"
+    assert failed_with_bad_artifact["artifact_error_code"] == "replay_artifact_missing"
+    assert not failed_with_bad_artifact.get("content_ref")
+
+    assert build_tool_result_card(invalid_card) == invalid_card
 
     empty = Path(store.store_text("", task_id="task", call_id="empty", kind="empty").content_ref)
     empty_result = validate_and_complete_text_artifact(empty, hashlib.sha256(b"").hexdigest())

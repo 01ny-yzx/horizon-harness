@@ -28,7 +28,6 @@ from core.observation_compaction import (
     compact_tool_result_for_model,
     observation_compaction_summary,
 )
-from core.observation_pruning import prune_observation_for_model_context
 from core.runtime_metrics import RuntimeMetrics
 from core.tool_call_schema import ToolCallEnvelope, ToolCallSource, ToolCallStatus
 from core.tool_observation import normalize_tool_result, observation_to_model_message_json
@@ -36,11 +35,6 @@ from core.tool_result_store import ToolResultStore
 from core.trace import AgentTrace
 from core.workspace import WorkspaceManager
 from core.workspace_runtime import set_current_workspace
-
-
-class DummyTaskState:
-    def __init__(self) -> None:
-        self.metadata: dict[str, object] = {}
 
 
 def _read_envelope(call_id: str, path: Path) -> ToolCallEnvelope:
@@ -265,31 +259,52 @@ def test_build_lane_previous_read_for_next_step_compact(workspace: Path) -> None
     assert payload["tool_name"] == "read_file"
 
 
-def test_pruning_skips_already_compacted_capsule(workspace: Path) -> None:
-    content = "P" * 10_000
-    source = workspace / "pruned-read.txt"
-    source.write_text(content, encoding="utf-8")
-    observation = normalize_tool_result(
-        _read_envelope("pruned-read", source),
-        {"success": True, "status": "success", "metadata": {"path": str(source)}, "data": content},
+def test_execution_facts_survive_projection_for_every_lane() -> None:
+    success_payload = {
+        "observation_id": "obs-memory-success",
+        "call_id": "call-memory-success",
+        "provider_call_id": "provider-memory-success",
+        "tool": "remember_user_preference",
+        "success": True,
+        "status": "success",
+        "data": {"key": "answer_first_line", "value": "PREF6:"},
+    }
+    failure_payload = {
+        "observation_id": "obs-memory-failure",
+        "call_id": "call-memory-failure",
+        "provider_call_id": "provider-memory-failure",
+        "tool": "remember_user_preference",
+        "success": False,
+        "status": "failed",
+        "error": "preference rejected",
+        "error_code": "invalid_preference",
+        "recoverable": True,
+        "data": {},
+    }
+    forbidden_markers = (
+        "chat_lane_observation_placeholder",
+        "Tool observation omitted from chat model context",
     )
-    compacted = compact_observation_for_model(observation)
-    model_json = compacted["model_observation_json"]
-    pruned_json, decision = prune_observation_for_model_context(
-        model_json,
-        tool_name="read_file",
-        runtime_lane="build",
-        task_state=DummyTaskState(),
-        tool_call_id="call_read",
-    )
-    payload = json.loads(pruned_json)
-    assert payload["observation_compacted"] is True
-    assert payload["_already_compacted"] is True
-    assert payload["preview"]
-    assert payload["source_chars"] == 10_000
-    assert payload["source_ref"] and not payload.get("content_ref")
-    assert "P" * 5_000 not in pruned_json
-    assert decision.reason == "build_observation_compacted"
+    for lane in ("chat", "explore", "build", "research"):
+        successful = compact_observation_for_model(success_payload, runtime_lane=lane)
+        successful_json = successful["model_observation_json"]
+        successful_summary = json.loads(successful_json)
+        assert successful_summary["success"] is True
+        assert successful_summary["status"] == "success"
+        assert successful_summary["tool_name"] == "remember_user_preference"
+        assert successful_summary["observation_id"] == "obs-memory-success"
+        assert successful_summary["call_id"] == "call-memory-success"
+        assert successful_summary["provider_call_id"] == "provider-memory-success"
+        assert not any(marker in successful_json for marker in forbidden_markers)
+
+        failed = compact_observation_for_model(failure_payload, runtime_lane=lane)
+        failed_summary = json.loads(failed["model_observation_json"])
+        assert failed_summary["success"] is False
+        assert failed_summary["status"] == "failed"
+        assert failed_summary["error_code"] == "invalid_preference"
+        assert failed_summary["error"] == "preference rejected"
+        assert failed_summary["recoverable"] is True
+        assert failed_summary["call_id"] == "call-memory-failure"
 
 
 def test_trace_and_metrics_summary(workspace: Path) -> None:
@@ -327,7 +342,7 @@ def main() -> None:
             test_path_grounding_short_summary(workspace)
             test_model_message_uses_compact_observation(workspace)
             test_build_lane_previous_read_for_next_step_compact(workspace)
-            test_pruning_skips_already_compacted_capsule(workspace)
+            test_execution_facts_survive_projection_for_every_lane()
             test_trace_and_metrics_summary(workspace)
     finally:
         os.chdir(original_cwd)

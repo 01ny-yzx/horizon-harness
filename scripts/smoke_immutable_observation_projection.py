@@ -84,6 +84,37 @@ def main() -> None:
             assert build_tool_result_card(stable) == stable_card
             replay_changed = observation_from_cache_snapshot(_envelope("read-changed", path), stable_snapshot)
             assert not replay_changed.success and replay_changed.error_code == "replay_source_hash_mismatch"
+
+            artifact_envelope = ToolCallEnvelope(
+                call_id="artifact-original",
+                provider_call_id="artifact-original",
+                source=ToolCallSource.STRUCTURED,
+                raw_name="generic_tool",
+                tool_name="generic_tool",
+                canonical_name="generic_tool",
+                executable_name="generic_tool",
+                raw_arguments="{}",
+                parsed_arguments={},
+                sanitized_arguments={},
+                status=ToolCallStatus.EXECUTABLE,
+                metadata={"tool_spec_found": True, "task_id": "immutable-observation"},
+            )
+            artifact_observation = normalize_tool_result(
+                artifact_envelope,
+                {"success": True, "status": "success", "data": {"body": "A" * 13_000}},
+            )
+            artifact_path = Path(artifact_observation.content_ref)
+            assert artifact_path.exists()
+            artifact_before = build_tool_result_card(artifact_observation)
+            assert artifact_before["success"] is True and artifact_before.get("content_ref")
+            artifact_path.unlink()
+            artifact_after = build_tool_result_card(artifact_observation)
+            assert artifact_after["success"] is True
+            assert artifact_after["status"] == "success"
+            assert not artifact_after.get("error_code")
+            assert artifact_after["artifact_error_code"] == "replay_artifact_missing"
+            assert artifact_after["artifact_available"] is False
+            assert not artifact_after.get("content_ref")
     finally:
         os.chdir(old_cwd)
         for key, value in _OLD_ENV.items():
