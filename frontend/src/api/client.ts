@@ -6,8 +6,11 @@ import type {
   BrowserUrlRequest,
   ChatRequest,
   ChatResponse,
+  ClearMemoryTypeRequest,
+  DeleteMemoryReferenceRequest,
+  DeleteProjectInstructionRequest,
+  DeleteUserPreferenceRequest,
   DocumentLoadRequest,
-  ForgetMemoryRequest,
   MemoryListResponse,
   MCPInstallRequest,
   MCPInstalledItem,
@@ -115,8 +118,14 @@ export function createApiClient(config: ApiClientConfig) {
     getWorkspaceStatus: () => post<WorkspaceStatusResponse>("/workspace/status", workspace()),
     listMemory: (body: Partial<WorkspaceRequest> & { memory_type?: string } = {}) =>
       post<ApiResponse<MemoryListResponse>>("/memory/list", { ...workspace(), memory_type: "all", ...body }),
-    forgetMemory: (body: Omit<ForgetMemoryRequest, "user_id" | "project_id">) =>
-      post<ApiResponse>("/memory/forget", { ...workspace(), ...body }),
+    deleteMemoryReference: (body: Omit<DeleteMemoryReferenceRequest, "user_id" | "project_id">) =>
+      post<ApiResponse>("/memory/reference/delete", { ...workspace(), ...body }),
+    deleteUserPreference: (body: Omit<DeleteUserPreferenceRequest, "user_id" | "project_id">) =>
+      post<ApiResponse>("/memory/preference/delete", { ...workspace(), ...body }),
+    deleteProjectInstruction: (body: Omit<DeleteProjectInstructionRequest, "user_id" | "project_id">) =>
+      post<ApiResponse>("/memory/project-instruction/delete", { ...workspace(), ...body }),
+    clearMemoryType: (body: Omit<ClearMemoryTypeRequest, "user_id" | "project_id">) =>
+      post<ApiResponse>("/memory/type/clear", { ...workspace(), ...body }),
     rememberPreference: (body: Omit<RememberPreferenceRequest, "user_id" | "project_id">) =>
       post<ApiResponse>("/memory/remember/preference", { ...workspace(), ...body }),
     loadDocument: (body: Omit<DocumentLoadRequest, "user_id" | "project_id">) =>

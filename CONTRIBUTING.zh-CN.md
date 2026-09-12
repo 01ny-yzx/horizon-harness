@@ -1,8 +1,8 @@
-# 参与 Horizon Runtime 贡献
+# 参与 Horizon Agent Harness 贡献
 
 [English](CONTRIBUTING.md)
 
-感谢你帮助改进 Horizon Runtime。
+感谢你帮助改进 Horizon Agent Harness。
 
 ## 开始之前
 

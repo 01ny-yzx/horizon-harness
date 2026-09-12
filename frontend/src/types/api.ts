@@ -79,9 +79,20 @@ export interface DocumentLoadRequest extends WorkspaceRequest {
   create_chunks?: boolean;
 }
 
-export interface ForgetMemoryRequest extends WorkspaceRequest {
+export interface DeleteMemoryReferenceRequest extends WorkspaceRequest {
+  reference_id: string;
+}
+
+export interface DeleteUserPreferenceRequest extends WorkspaceRequest {
+  key: string;
+}
+
+export interface DeleteProjectInstructionRequest extends WorkspaceRequest {
+  content: string;
+}
+
+export interface ClearMemoryTypeRequest extends WorkspaceRequest {
   memory_type: string;
-  keyword: string;
 }
 
 export interface RememberPreferenceRequest extends WorkspaceRequest {

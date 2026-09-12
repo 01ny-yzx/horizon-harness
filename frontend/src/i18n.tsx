@@ -7,7 +7,7 @@ type TranslationKey =
   | "actions.cacheStatus"
   | "actions.cleanup"
   | "actions.extractText"
-  | "actions.forget"
+  | "actions.deleteMemory"
   | "actions.install"
   | "actions.updatePermissions"
   | "actions.applyPermissions"
@@ -81,7 +81,7 @@ type TranslationKey =
   | "errors.invalidRequest"
   | "errors.documentList"
   | "errors.documentLoad"
-  | "errors.memoryForget"
+  | "errors.memoryDelete"
   | "errors.memoryRead"
   | "errors.mcpMarketplace"
   | "errors.mcpPermissions"
@@ -98,7 +98,8 @@ type TranslationKey =
   | "fields.apiBaseUrl"
   | "fields.apiKey"
   | "fields.documentPath"
-  | "fields.forgetKeyword"
+  | "fields.memoryDeleteMode"
+  | "fields.memoryDeleteTarget"
   | "fields.llmApiKeyConfigured"
   | "fields.llmBaseUrl"
   | "fields.llmModel"
@@ -193,7 +194,7 @@ const translations: Record<Language, Record<TranslationKey, string>> = {
     "actions.cacheStatus": "Cache Status",
     "actions.cleanup": "Cleanup",
     "actions.extractText": "Extract Text",
-    "actions.forget": "Forget",
+    "actions.deleteMemory": "Delete Memory",
     "actions.install": "Install",
     "actions.updatePermissions": "Update Permissions",
     "actions.applyPermissions": "Apply Permissions",
@@ -267,7 +268,7 @@ const translations: Record<Language, Record<TranslationKey, string>> = {
     "errors.invalidRequest": "Request format is invalid. Check user_id, project_id, and input.",
     "errors.documentList": "Document list failed",
     "errors.documentLoad": "Document load failed",
-    "errors.memoryForget": "Forget memory failed",
+    "errors.memoryDelete": "Delete memory failed",
     "errors.memoryRead": "Memory read failed",
     "errors.mcpMarketplace": "MCP Marketplace request failed",
     "errors.mcpPermissions": "MCP permissions request failed",
@@ -284,7 +285,8 @@ const translations: Record<Language, Record<TranslationKey, string>> = {
     "fields.apiBaseUrl": "API Base URL",
     "fields.apiKey": "API Key",
     "fields.documentPath": "Document path",
-    "fields.forgetKeyword": "Forget keyword",
+    "fields.memoryDeleteMode": "Exact delete mode",
+    "fields.memoryDeleteTarget": "Exact target",
     "fields.llmApiKeyConfigured": "API Key configured",
     "fields.llmBaseUrl": "LLM Base URL",
     "fields.llmModel": "LLM Model",
@@ -378,7 +380,7 @@ const translations: Record<Language, Record<TranslationKey, string>> = {
     "actions.cacheStatus": "缓存状态",
     "actions.cleanup": "清理",
     "actions.extractText": "提取文本",
-    "actions.forget": "删除记忆",
+    "actions.deleteMemory": "删除记忆",
     "actions.install": "安装",
     "actions.updatePermissions": "更新权限",
     "actions.applyPermissions": "应用权限",
@@ -452,7 +454,7 @@ const translations: Record<Language, Record<TranslationKey, string>> = {
     "errors.invalidRequest": "请求格式错误，请检查 user_id、project_id 和输入内容。",
     "errors.documentList": "读取文档列表失败",
     "errors.documentLoad": "加载文档失败",
-    "errors.memoryForget": "删除记忆失败",
+    "errors.memoryDelete": "删除记忆失败",
     "errors.memoryRead": "读取记忆失败",
     "errors.mcpMarketplace": "MCP 插件市场请求失败",
     "errors.mcpPermissions": "MCP 权限请求失败",
@@ -469,7 +471,8 @@ const translations: Record<Language, Record<TranslationKey, string>> = {
     "fields.apiBaseUrl": "API 基础地址",
     "fields.apiKey": "API Key",
     "fields.documentPath": "文档路径",
-    "fields.forgetKeyword": "删除关键词",
+    "fields.memoryDeleteMode": "精确删除类型",
+    "fields.memoryDeleteTarget": "精确目标",
     "fields.llmApiKeyConfigured": "API Key 已配置",
     "fields.llmBaseUrl": "LLM 基础地址",
     "fields.llmModel": "LLM 模型",
@@ -563,7 +566,7 @@ const translations: Record<Language, Record<TranslationKey, string>> = {
     "actions.cacheStatus": "キャッシュ状態",
     "actions.cleanup": "クリーンアップ",
     "actions.extractText": "テキスト抽出",
-    "actions.forget": "記憶を削除",
+    "actions.deleteMemory": "記憶を削除",
     "actions.install": "インストール",
     "actions.updatePermissions": "権限を更新",
     "actions.applyPermissions": "権限を適用",
@@ -637,7 +640,7 @@ const translations: Record<Language, Record<TranslationKey, string>> = {
     "errors.invalidRequest": "リクエスト形式が無効です。user_id、project_id、入力内容を確認してください。",
     "errors.documentList": "文書一覧の取得に失敗しました",
     "errors.documentLoad": "文書の読み込みに失敗しました",
-    "errors.memoryForget": "記憶の削除に失敗しました",
+    "errors.memoryDelete": "記憶の削除に失敗しました",
     "errors.memoryRead": "記憶の取得に失敗しました",
     "errors.mcpMarketplace": "MCP マーケットプレイスのリクエストに失敗しました",
     "errors.mcpPermissions": "MCP 権限リクエストに失敗しました",
@@ -654,7 +657,8 @@ const translations: Record<Language, Record<TranslationKey, string>> = {
     "fields.apiBaseUrl": "API ベース URL",
     "fields.apiKey": "API Key",
     "fields.documentPath": "文書パス",
-    "fields.forgetKeyword": "削除キーワード",
+    "fields.memoryDeleteMode": "完全一致の削除方法",
+    "fields.memoryDeleteTarget": "完全一致の対象",
     "fields.llmApiKeyConfigured": "API Key 設定済み",
     "fields.llmBaseUrl": "LLM ベース URL",
     "fields.llmModel": "LLM モデル",

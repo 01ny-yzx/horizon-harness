@@ -1,40 +1,78 @@
-# Horizon Runtime
+# Horizon Agent Harness
 
 [简体中文](README.zh-CN.md)
 
-Horizon Runtime is a local-first AI agent runtime with structured tool calling, deterministic execution safety boundaries, and LLM-driven continuation.
+Horizon is a local-first AI agent harness. It sits between an LLM and local capabilities, running the agent loop, exposing tools, enforcing permissions, dispatching operations, and returning structured observations to the model.
 
-> Status: initial public release. Interfaces may still change. Keep the default read-only access mode until you intentionally need local side effects.
+The model chooses tools and arguments and decides when the task is complete. The harness makes those decisions executable, bounded, and traceable.
 
-## Highlights
+> Status: initial public release. Interfaces and capability boundaries may still change. Use the default `read_only` mode until local side effects are intentionally required.
 
-- Structured ToolCalls: the model selects the tool and supplies its arguments.
-- Deterministic safety: schema, access mode, path, working directory, timeout, browser, database, and MCP checks remain runtime responsibilities.
-- Execution fidelity: distinct call IDs execute independently, while duplicate delivery of the same call ID replays its prior observation.
-- Response-scoped doom-loop protection through an explicit permission boundary.
-- ToolObservation-driven continuation until the model returns a final response.
-- Local tools for files, documents, shell execution, Git, web search/fetch, browser automation, memory, RAG, workspaces, usage, and cache management.
-- Optional MCP runtime, FastAPI service, and React/Vite desktop-style web interface.
+## What the harness owns
 
-## Runtime flow
+- **Agent loop:** model responses, ToolCalls, ToolObservations, and continuation turns.
+- **Dynamic tool surface:** tools are exposed according to availability, access mode, and task grants.
+- **Execution boundary:** centralized checks for schemas, paths, working directories, URLs, SQL, browser actions, timeouts, and side effects.
+- **Reliable dispatch:** repeated delivery of the same call ID replays its prior observation, while response-scoped repetition is checked for loops.
+- **Context and data:** session memory, persistent memory, documents, RAG, workspaces, usage, cache, and traces.
+- **Multiple entry points:** command-line, FastAPI, and a React/Vite web interface.
+
+## Execution flow
 
 ```text
-LLM structured ToolCall
--> same-call replay check
--> response-scoped doom-loop permission
--> execution boundary
+User request
+-> harness assembles context and the current tool surface
+-> LLM returns prose or structured ToolCalls
+-> call-ID replay and repeated-call checks
+-> permission and ExecutionBoundary validation
 -> real tool dispatch
 -> ToolObservation
 -> LLM continuation or final response
 ```
 
+## Built-in capabilities
+
+The local tool set covers:
+
+- file reads, search, writes, and text replacement;
+- document ingestion, chunking, and local RAG;
+- shell commands and bounded Python execution;
+- Git status, diffs, branches, and guarded mutations;
+- web search, page fetching, and browser automation;
+- session memory, persistent memory, and vector storage;
+- multi-user and multi-project workspaces;
+- usage, cache, traces, and runtime metrics;
+- installation, configuration, lifecycle, and status management for local MCP services.
+
+## Repository map
+
+| Path | Responsibility |
+| --- | --- |
+| `main.py` | Command-line entry point |
+| `core/` | AgentLoop, execution boundary, state, context, memory, and RAG |
+| `tools/` | Local tool implementations, schemas, registry, and risk metadata |
+| `providers/` | OpenAI-compatible model adapter |
+| `api/` | FastAPI service |
+| `frontend/` | React/Vite web interface |
+| `mcp_servers/` | Repository-provided local MCP servers |
+| `cloud_mcp/` | Preview Cloud MCP infrastructure |
+| `scripts/` | Smoke, audit, and launch scripts |
+| `evals/` | Behavioral evals |
+
+## Current boundaries
+
+- AgentLoop currently exposes repository-local tools. MCP management, connection, and permission infrastructure exists, but MCP tools are not yet injected into the model-visible tool surface.
+- Cloud MCP remains preview infrastructure; remote tool execution is not enabled.
+- `/chat` is synchronous and the frontend waits for the completed task result. SSE, WebSocket, and streaming responses are not currently implemented.
+- The sandbox is a bounded host subprocess executor with permission, timeout, and output controls. It is not container or operating-system isolation.
+- The API binds to `127.0.0.1` by default. `/health` and `/status` are currently public; the remaining routes can be protected with API keys.
+
 ## Requirements
 
 - Python 3.10 or newer; the project is tested with Python 3.12.
-- Node.js 18 or newer for the optional frontend.
+- Node.js 18 or newer for the frontend.
 - An OpenAI-compatible LLM endpoint and API key.
-
-Browser tools additionally require a Playwright browser installation.
+- A Playwright browser installation for browser tools.
 
 ## Quick start
 
@@ -70,7 +108,7 @@ AGENT_ACCESS_MODE=read_only
 python main.py
 ```
 
-Type `exit` or `quit` to leave the interactive session.
+Type `exit` or `quit` to leave the session.
 
 ### Local API
 
@@ -80,7 +118,7 @@ python scripts/run_api.py
 
 The default address is `http://127.0.0.1:8000`. FastAPI documentation is available at `http://127.0.0.1:8000/docs` while the service is running.
 
-### Frontend
+### Web interface
 
 Start the API first, then run:
 
@@ -90,35 +128,35 @@ npm install
 npm run dev
 ```
 
-The frontend uses `http://127.0.0.1:8000` by default and lets you change the backend URL, API key, user ID, and project ID in Settings.
+The frontend connects to `http://127.0.0.1:8000` by default. The backend URL, API key, user ID, and project ID can be changed in Settings.
 
-### Browser support
+### Browser tools
 
-After installing Python dependencies, install Chromium if you want to use browser tools:
+After installing Python dependencies, install Chromium:
 
 ```bash
 python -m playwright install chromium
 ```
 
-## Configuration
+## Common configuration
 
-Use [.env.example](.env.example) as the authoritative public template. Important settings include:
+Use [.env.example](.env.example) as the public configuration reference.
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `LLM_PROVIDER` | Provider adapter | `openai_compatible` |
+| `LLM_PROVIDER` | Model provider adapter | `openai_compatible` |
 | `LLM_BASE_URL` | Model API endpoint | empty |
 | `LLM_MODEL` | Model identifier | empty |
 | `LLM_API_KEY` | Local model credential | empty |
 | `AGENT_ACCESS_MODE` | `read_only` or `full_access` | `read_only` |
-| `API_AUTH_ENABLED` | Enable API key protection | `false` |
+| `API_AUTH_ENABLED` | Enable API-key checks for protected routes | `false` |
 | `API_KEYS` | Comma-separated service API keys | development placeholder |
 | `WEB_SEARCH_PROVIDER` | `auto`, `searxng`, `tavily`, or `disabled` | `auto` |
-| `MCP_ENABLED` | Enable local MCP runtime loading | `false` |
+| `MCP_ENABLED` | Load local MCP management and connection capabilities | `false` |
 
-Do not commit `.env`, frontend environment files, local MCP configuration, credentials, or runtime stores.
+Do not commit `.env`, frontend environment files, local MCP configuration, credentials, workspace data, or runtime artifacts.
 
-## Tests
+## Validation
 
 Run the repository safety check:
 
@@ -141,8 +179,8 @@ python evals/run_evals.py
 ## Contributing and security
 
 - See [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a change.
-- Report vulnerabilities according to [SECURITY.md](SECURITY.md); do not publish exploit details in a public issue.
+- Report vulnerabilities privately according to [SECURITY.md](SECURITY.md); do not publish exploit details in a public issue.
 
 ## License
 
-Horizon Runtime is licensed under the [MIT License](LICENSE). An unofficial [Simplified Chinese translation](LICENSE.zh-CN) is provided for reference; the English license is authoritative.
+Horizon Agent Harness is licensed under the [MIT License](LICENSE). An unofficial [Simplified Chinese translation](LICENSE.zh-CN) is provided for reference; the English license is authoritative.

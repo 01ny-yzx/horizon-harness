@@ -1,8 +1,8 @@
-# Contributing to Horizon Runtime
+# Contributing to Horizon Agent Harness
 
 [简体中文](CONTRIBUTING.zh-CN.md)
 
-Thank you for helping improve Horizon Runtime.
+Thank you for helping improve Horizon Agent Harness.
 
 ## Before you start
 
