@@ -1,13 +1,6 @@
 [
   {
     "runtime_provider": "openai_compatible",
-    "runtime_model": "deepseek-v4-flash",
-    "canonical_id": "deepseek/deepseek-v4-flash",
-    "source": "https://models.dev/api.json",
-    "verified_at": "2026-07-19"
-  },
-  {
-    "runtime_provider": "openai_compatible",
     "runtime_model": "deepseek-chat",
     "canonical_id": "deepseek/deepseek-chat",
     "source": "https://models.dev/api.json",

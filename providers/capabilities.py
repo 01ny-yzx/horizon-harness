@@ -69,7 +69,7 @@ CAPABILITY_PRESETS: dict[str, LLMCapabilities] = {
 MODEL_CAPABILITY_RULES: tuple[dict[str, Any], ...] = (
     {
         "provider": "openai_compatible",
-        "model_contains": ("deepseek-v4-flash",),
+        "model_contains": ("deepseek-flash",),
         "preset": "deepseek_reasoning",
     },
     {

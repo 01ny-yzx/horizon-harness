@@ -26,10 +26,10 @@ def test_provider_candidates_and_limits() -> None:
     assert sonar.candidate_provider_ids == perplexity
     assert sonar.resolution_reason == "endpoint_provider_exact_model"
 
-    shared = resolve_model_limit("openai_compatible", "deepseek-v4-flash", base_url="https://opencode.ai/v1")
+    shared = resolve_model_limit("openai_compatible", "glm-5.2", base_url="https://opencode.ai/v1")
     assert shared.resolution_reason == "shared_identical_limits" and not shared.ambiguous
     assert shared.provider_id == "" and len(shared.candidate_model_ids) == 2
-    assert shared.max_context_tokens == 1_000_000 and shared.max_output_tokens == 384_000
+    assert shared.max_context_tokens == 1_000_000 and shared.max_output_tokens == 131_072
 
     ambiguous = resolve_model_limit("openai_compatible", "glm-5", base_url="https://opencode.ai/v1")
     assert ambiguous.ambiguous and ambiguous.resolution_reason == "ambiguous_provider_model"
@@ -40,14 +40,15 @@ def test_provider_candidates_and_limits() -> None:
     assert opencode_mimo.canonical_id != "xiaomi/mimo-v2.5-pro"
 
     zhipu = resolve_model_limit("openai_compatible", "glm-4.5-air", base_url="https://open.bigmodel.cn/v1")
-    assert zhipu.resolution_reason == "shared_identical_limits"
+    assert zhipu.resolution_reason == "endpoint_provider_exact_model"
     assert zhipu.candidate_provider_ids == ("zhipuai", "zhipuai-coding-plan")
+    assert zhipu.canonical_id == "zhipuai/glm-4.5-air"
 
     alias_conflict = resolve_model_limit("openai_compatible", "deepseek-chat", base_url="https://api.openai.com/v1")
     assert alias_conflict.resolution_reason == "unresolved" and not alias_conflict.canonical_id
 
-    unique = resolve_model_limit("proxy", "claude-3-5-haiku-latest", base_url="https://unknown.invalid/v1")
-    assert unique.resolution_reason == "unique_global_model_id" and unique.canonical_id == "302ai/claude-3-5-haiku-latest"
+    unique = resolve_model_limit("proxy", "deepseek-chat", base_url="https://unknown.invalid/v1")
+    assert unique.resolution_reason == "unique_global_model_id" and unique.canonical_id == "nano-gpt/deepseek-chat"
 
     canonical_conflict = resolve_model_limit("openai_compatible", "xiaomi/mimo-v2.5-pro", base_url="https://opencode.ai/v1")
     assert canonical_conflict.ambiguous and canonical_conflict.resolution_reason == "ambiguous_provider_model"
@@ -70,7 +71,7 @@ def test_vertex_hosts_and_trace_metadata() -> None:
     ):
         assert resolve_provider_candidates(f"https://{host}/v1") == ()
 
-    resolution = resolve_model_limit("openai_compatible", "deepseek-v4-flash", base_url="https://opencode.ai/v1")
+    resolution = resolve_model_limit("openai_compatible", "glm-5.2", base_url="https://opencode.ai/v1")
     config = SimpleNamespace(
         capabilities=LLMCapabilities(max_context_tokens=resolution.max_context_tokens, max_output_tokens=resolution.max_output_tokens),
         model_limit_source=resolution.source,

@@ -38,8 +38,8 @@ def main() -> None:
     unique_result = resolve_model_limit("openai_compatible", unique["model_id"], base_url=endpoints[0])
     assert unique_result.canonical_id == unique["canonical_id"] and unique_result.resolution_reason == "unique_global_model_id"
 
-    alias = resolve_model_limit("openai_compatible", "deepseek-chat", base_url=endpoints[1])
-    assert alias.canonical_id == "deepseek/deepseek-chat" and alias.resolution_reason == "exact_alias"
+    alias = resolve_model_limit("openai_compatible", "mimo-v2.5-pro", base_url=endpoints[1])
+    assert alias.canonical_id == "xiaomi/mimo-v2.5-pro" and alias.resolution_reason == "exact_alias"
     unresolved = resolve_model_limit("openai_compatible", "gpt-4o", base_url=endpoints[0])
     assert unresolved.resolution_reason == "unresolved" and unresolved.max_context_tokens is None
     try:

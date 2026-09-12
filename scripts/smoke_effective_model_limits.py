@@ -52,7 +52,7 @@ def main() -> None:
     assert decision.model_limit_correction_reason == "catalog_input_limit_ignored"
 
     mistral = create_llm_provider(_settings("https://api.mistral.ai/v1", "mistral-large-latest"))
-    kimi = create_llm_provider(_settings("https://api.moonshot.ai/v1", "kimi-k2.5"))
+    kimi = create_llm_provider(_settings("https://api.moonshot.ai/v1", "kimi-k2.6"))
     assert mistral.capabilities.max_context_tokens == mistral.capabilities.max_output_tokens == 262144
     assert kimi.capabilities.max_context_tokens == kimi.capabilities.max_output_tokens == 262144
     print("smoke_effective_model_limits ok")
