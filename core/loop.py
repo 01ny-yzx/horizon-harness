@@ -53,6 +53,7 @@ from core.finalization_context_snapshot import (
     FinalizationContextSnapshot,
     build_finalization_context_snapshot,
     finalization_snapshot_trace_summary,
+    resolve_task_outcome_status_from_execution,
 )
 from core.finalization_path import (
     FinalAnswerPathDecision,
@@ -80,17 +81,25 @@ from core.initial_tool_surface import (
     permission_tool_schema_chars,
     resolve_permission_tool_schemas,
 )
+from core.instruction_context import (
+    instruction_paths_from_messages,
+    resolve_nearby_instruction_context,
+)
 from core.guard_fast_path import record_guard_fast_path
 from core.document_store import DocumentStore
 from core.context_fusion import ContextFusionEngine
 from core.context_budget import apply_context_budget, context_budget_config_from_settings
 from core.llm_call_profile import resolve_llm_call_options
 from core.memory import Memory
-from core.memory_result_formatter import format_memory_delete_result
+from core.memory_mutation_policy import (
+    MEMORY_MUTATION_TOOLS,
+    MEMORY_TOOLS,
+    memory_mutation_context,
+)
+from core.memory_reference_guidance import resolve_memory_reference_guidance
 from core.message_validator import validate_openai_tool_messages
 from core.mcp_registry import MCPRegistry
 from core.mcp_runtime import MCPRuntimeStatus, build_mcp_runtime
-from core.observation_pruning import prune_observation_for_model_context
 from core.observation_compaction import compact_observation_for_model, observation_compaction_summary
 from core.path_grounding import build_path_context, compact_path_grounding, ground_exec_cwd
 from core.persistent_memory import PersistentMemory, utc_now
@@ -98,6 +107,11 @@ from core.prompt_pack import (
     PromptPack,
     build_initial_agent_turn_pack,
     build_tool_call_pack,
+)
+from core.request_guidance import (
+    request_guidance_trace_payload,
+    resolve_request_guidance,
+    resolve_request_guidance_transition,
 )
 from core.rag import RAGEngine
 from core.browser_policy import BrowserPolicy
@@ -181,16 +195,23 @@ from tools.registry import get_local_tool_registry, get_local_tool_schemas, get_
 
 
 ToolFunction = Callable[..., dict[str, Any]]
-MEMORY_TOOL_NAMES = frozenset(
-    {
-        "remember_user_preference",
-        "remember_stable_fact",
-        "remember_project_summary",
-        "list_memories",
-        "forget_memory",
-        "clear_memory_type",
-    }
-)
+MEMORY_TOOL_NAMES = MEMORY_MUTATION_TOOLS
+MEMORY_SAVE_UPDATE_TOOLS = frozenset({
+    "remember_user_preference",
+    "remember_stable_fact",
+    "remember_project_summary",
+    "remember_project_instruction",
+    "update_stable_fact",
+    "update_project_instruction",
+})
+MEMORY_TYPE_BY_SAVE_UPDATE_TOOL = {
+    "remember_user_preference": "user_preference",
+    "remember_stable_fact": "stable_fact",
+    "remember_project_summary": "project_summary",
+    "remember_project_instruction": "project_instruction",
+    "update_stable_fact": "stable_fact",
+    "update_project_instruction": "project_instruction",
+}
 
 RETIRED_EXECUTION_TOOL_IDENTIFIERS = frozenset(
     {
@@ -730,6 +751,30 @@ def _is_local_file_read_task(task_state: TaskState) -> bool:
     return primary_capability == "file_read" or primary_tool == "read_file"
 
 
+def _is_memory_management_only_task(task_state: TaskState) -> bool:
+    """Return whether a task performed only Memory search/read/mutation work."""
+
+    metadata = task_state.metadata if isinstance(task_state.metadata, dict) else {}
+    observed_tools: list[str] = []
+    observations = metadata.get("completion_observations")
+    for item in observations if isinstance(observations, list) else []:
+        if not isinstance(item, dict):
+            continue
+        nested = item.get("observation")
+        observation = nested if isinstance(nested, dict) else item
+        tool_name = str(
+            observation.get("tool")
+            or observation.get("tool_name")
+            or observation.get("canonical_name")
+            or ""
+        ).strip()
+        if tool_name:
+            observed_tools.append(base_tool_name(tool_name))
+    if observed_tools:
+        return all(tool_name in MEMORY_TOOLS for tool_name in observed_tools)
+    return metadata.get("memory_tool_attempted") is True
+
+
 def _record_successful_file_write_evidence(
     task_state: TaskState,
     *,
@@ -1207,7 +1252,11 @@ class AgentLoop:
         self.workspace_manager = WorkspaceManager()
         self.workspace = self.workspace_manager.get_context(user_id, project_id)
         set_current_workspace(self.workspace)
-        self.persistent_memory = PersistentMemory(memory_dir=self.workspace.memory_dir)
+        self.persistent_memory = PersistentMemory(
+            database_path=self.workspace.database_path,
+            user_id=self.workspace.user_id,
+            project_id=self.workspace.project_id,
+        )
         self.document_store = DocumentStore(document_dir=self.workspace.document_dir)
         self.rag_engine = RAGEngine(self.document_store)
         self.context_fusion = ContextFusionEngine()
@@ -1226,6 +1275,7 @@ class AgentLoop:
         self.last_trace_path = ""
         self.last_trace_latest_path = ""
         self.last_trace_save_error = ""
+        self._last_request_guidance_fingerprint = ""
 
     def run(self, user_input: str, user_id: str | None = None, project_id: str | None = None) -> str:
         """Handle one user task and return a clean final answer."""
@@ -1239,10 +1289,18 @@ class AgentLoop:
                 user_id or self.workspace.user_id,
                 project_id or self.workspace.project_id,
             )
-            self.persistent_memory = PersistentMemory(memory_dir=self.workspace.memory_dir)
+            self.persistent_memory = PersistentMemory(
+                database_path=self.workspace.database_path,
+                user_id=self.workspace.user_id,
+                project_id=self.workspace.project_id,
+            )
             self.document_store = DocumentStore(document_dir=self.workspace.document_dir)
             self.rag_engine = RAGEngine(self.document_store)
         set_current_workspace(self.workspace)
+        path_context = build_path_context(
+            user_id=self.workspace.user_id,
+            project_id=self.workspace.project_id,
+        )
         metrics = RuntimeMetrics()
         metrics.record_model_limits(getattr(self.llm, "config", None))
         self._runtime_metrics = metrics
@@ -1274,13 +1332,46 @@ class AgentLoop:
             schema_chars=permission_schema_chars,
         )
         initial_tools = initial_agent_turn_tools(initial_surface)
+        instruction_project_root = path_context.project_root
+        request_guidance = resolve_request_guidance(
+            project_root=instruction_project_root,
+            persistent_memory=self.persistent_memory,
+        )
+        request_guidance_transition = resolve_request_guidance_transition(
+            request_guidance,
+            previous_effective_fingerprint=(
+                self._last_request_guidance_fingerprint
+            ),
+        )
+        reference_guidance = resolve_memory_reference_guidance(
+            persistent_memory=self.persistent_memory,
+        )
+        active_request_instruction_paths = request_guidance.instruction_paths
         initial_session_context = self.memory.get_agent_turn_context("", user_input)
         initial_context_summary = initial_session_context.trace_summary()
         initial_context_summary["runtime_model_identity_included"] = True
+        initial_context_summary["instruction_context_included"] = (
+            request_guidance.root_instruction_included
+        )
+        initial_context_summary["persistent_guidance_included"] = (
+            request_guidance.persistent_guidance_included
+        )
+        initial_context_summary["persistent_reference_context_included"] = (
+            reference_guidance.available
+        )
+        initial_context_summary["persistent_context_included"] = bool(
+            request_guidance.persistent_guidance_included
+            or reference_guidance.available
+        )
         initial_pack = build_initial_agent_turn_pack(
             user_input=user_input,
             tools=initial_tools,
             memory_messages=initial_session_context.messages,
+            request_guidance_messages=[
+                *request_guidance.system_messages,
+                *request_guidance_transition.system_messages,
+            ],
+            reference_guidance_messages=list(reference_guidance.system_messages),
             runtime_model_identity_note=build_runtime_model_identity_note(
                 settings.llm_provider,
                 settings.llm_model,
@@ -1311,6 +1402,9 @@ class AgentLoop:
             metrics=metrics,
             model=settings.llm_model,
         )
+        self._last_request_guidance_fingerprint = (
+            request_guidance.effective_guidance_fingerprint
+        )
         initial_result = initial_execution.result
         initial_elapsed = initial_execution.elapsed_ms
         metrics.record_initial_agent_turn(
@@ -1336,7 +1430,35 @@ class AgentLoop:
         task_state.user_id = self.workspace.user_id
         task_state.project_id = self.workspace.project_id
         task_state.workspace_id = self.workspace.workspace_id
+        task_state.memory_used = bool(
+            request_guidance.persistent_guidance_included
+            or reference_guidance.available
+        )
+        task_state.metadata["instruction_project_root"] = str(instruction_project_root)
+        task_state.metadata["initial_instruction_paths"] = list(
+            request_guidance.instruction_paths
+        )
+        task_state.metadata["initial_instruction_unavailable_paths"] = list(
+            request_guidance.unavailable_instruction_paths
+        )
         trace = AgentTrace(task_state.task_id, user_input, task_state.task_type)
+        trace.add_event(
+            0,
+            "request_guidance_resolved",
+            "Request guidance resolved for the initial Agent request.",
+            success=True,
+            data=request_guidance_trace_payload(
+                request_guidance,
+                stage="initial_agent_turn",
+                resolution_mode="fresh",
+                guidance_changed_since_previous_request=(
+                    request_guidance_transition.guidance_changed_since_previous_request
+                ),
+                transition_note_included=(
+                    request_guidance_transition.transition_note_included
+                ),
+            ),
+        )
         trace.add_event(
             0,
             "agent_turn_context",
@@ -1436,6 +1558,7 @@ class AgentLoop:
                 self.memory.add_user_message(user_input, task_id=task_state.task_id)
                 self.memory.add_assistant_message(content=initial_result.user_message, tool_calls=None, task_id=task_state.task_id)
             task_state.is_finished = True
+            task_state.metadata["task_outcome_status"] = "failed"
             record_final_answer_path_once(
                 trace, 0, FinalAnswerPathDecision(
                     path="terminal_failure", trigger="initial_agent_turn_terminal_failure",
@@ -1451,6 +1574,7 @@ class AgentLoop:
                 self.memory.add_user_message(user_input, task_id=task_state.task_id)
                 self.memory.add_assistant_message(content=direct_answer, tool_calls=None, task_id=task_state.task_id)
             task_state.is_finished = True
+            task_state.metadata["task_outcome_status"] = "completed"
             task_state.mark_step_completed("final_summary", "Initial agent turn produced direct final answer.")
             task_state.mark_step_completed("summarize_result", "Initial agent turn produced direct final answer.")
             record_final_answer_path_once(
@@ -1487,15 +1611,20 @@ class AgentLoop:
                             f"research_flow={getattr(profile, 'research_flow', []) if profile else []} final_summary=pending"
                         ),
                     )
-                self.persistent_memory.load_all()
-                is_rag_task = bool(task_state.task_profile and getattr(task_state.task_profile, "needs_rag", False))
-                long_term_note = self.persistent_memory.format_for_prompt(mode="rag") if is_rag_task else self.persistent_memory.format_for_prompt()
-                self.memory.add_long_term_memory_note(long_term_note)
                 self.memory.add_document_note(self.document_store.format_for_prompt())
-                task_state.memory_used = bool(long_term_note.strip())
+                task_state.memory_used = bool(
+                    request_guidance.persistent_guidance_included
+                    or reference_guidance.available
+                )
                 self.memory.add_user_message(user_input, task_id=task_state.task_id)
         if simple_fast_path is not None and simple_fast_path.enabled and runtime_lane is not None:
-            return self._run_simple_fast_path(user_input, task_state, trace, metrics)
+            return self._run_simple_fast_path(
+                user_input,
+                task_state,
+                trace,
+                metrics,
+                project_root=instruction_project_root,
+            )
         last_candidate_final_answer = ""
         finalization_snapshot: FinalizationContextSnapshot | None = None
         finalization_budget_decision: FinalizationContextBudgetDecision | None = None
@@ -1656,11 +1785,76 @@ class AgentLoop:
             reusing_initial_agent_turn = pending_initial_assistant_message is not None
             llm_stage = "agent_continuation"
             llm_options = resolve_llm_call_options(llm_stage, settings)
+            if reusing_initial_agent_turn:
+                current_request_guidance = request_guidance
+                current_reference_guidance = reference_guidance
+            else:
+                current_request_guidance = resolve_request_guidance(
+                    project_root=instruction_project_root,
+                    persistent_memory=self.persistent_memory,
+                )
+                current_reference_guidance = resolve_memory_reference_guidance(
+                    persistent_memory=self.persistent_memory,
+                )
+                active_request_instruction_paths = (
+                    current_request_guidance.instruction_paths
+                )
+            current_request_guidance_transition = (
+                resolve_request_guidance_transition(
+                    current_request_guidance,
+                    previous_effective_fingerprint=(
+                        self._last_request_guidance_fingerprint
+                    ),
+                )
+            )
+            trace.add_event(
+                step,
+                "request_guidance_resolved",
+                "Request guidance selected for the Agent continuation.",
+                success=True,
+                data=request_guidance_trace_payload(
+                    current_request_guidance,
+                    stage="agent_continuation",
+                    resolution_mode=(
+                        "reused_initial"
+                        if reusing_initial_agent_turn
+                        else "fresh"
+                    ),
+                    guidance_changed_since_previous_request=(
+                        current_request_guidance_transition.guidance_changed_since_previous_request
+                    ),
+                    transition_note_included=(
+                        current_request_guidance_transition.transition_note_included
+                    ),
+                ),
+            )
+            agent_turn_context_summary["instruction_context_included"] = (
+                current_request_guidance.root_instruction_included
+            )
+            agent_turn_context_summary["persistent_guidance_included"] = (
+                current_request_guidance.persistent_guidance_included
+            )
+            agent_turn_context_summary["persistent_reference_context_included"] = (
+                current_reference_guidance.available
+            )
+            agent_turn_context_summary["persistent_context_included"] = bool(
+                current_request_guidance.persistent_guidance_included
+                or agent_turn_context_summary["persistent_reference_context_included"]
+            )
             prompt_pack = build_tool_call_pack(
                 user_input=user_input,
                 task_state=task_state,
                 tools=scoped_tool_schemas,
                 memory_messages=memory_messages,
+                request_guidance_messages=list(
+                    (
+                        *current_request_guidance.system_messages,
+                        *current_request_guidance_transition.system_messages,
+                    )
+                ),
+                reference_guidance_messages=list(
+                    current_reference_guidance.system_messages
+                ),
                 runtime_model_identity_note=build_runtime_model_identity_note(
                     settings.llm_provider,
                     settings.llm_model,
@@ -1722,6 +1916,7 @@ class AgentLoop:
                     model_output_tokens=_model_output_tokens(self.llm),
                     reserved_output_tokens=_reserved_output_tokens(self.llm, llm_options),
                 )
+            visible_instruction_paths = instruction_paths_from_messages(messages)
             context_budget_elapsed = elapsed_ms(context_budget_started)
             metrics.record_context_budget(context_budget_decision, elapsed_ms=context_budget_elapsed)
             if llm_stage == "agent_continuation":
@@ -1848,6 +2043,9 @@ class AgentLoop:
                         messages=messages,
                         tools=scoped_tool_schemas,
                         options=llm_options,
+                    )
+                    self._last_request_guidance_fingerprint = (
+                        current_request_guidance.effective_guidance_fingerprint
                     )
                 except Exception as exc:
                     metrics.record_llm_call(
@@ -2012,6 +2210,7 @@ class AgentLoop:
                             },
                         )
                         task_state.is_finished = True
+                        task_state.metadata["task_outcome_status"] = "failed"
                         answer = self._build_final_answer_from_terminal_outcome(
                             task_state,
                             invalid_outcome,
@@ -2033,6 +2232,9 @@ class AgentLoop:
                 task_state.is_finished = True
                 task_state.mark_step_completed("final_summary", "Assistant produced final answer.")
                 task_state.mark_step_completed("summarize_result", "Assistant produced final answer.")
+                task_state.metadata["task_outcome_status"] = (
+                    resolve_task_outcome_status_from_execution(task_state)
+                )
                 self._print_block("Action", "finish")
                 task_state.metadata["direct_agent_prose_adopted"] = True
                 metrics.direct_agent_prose_adopted_count += 1
@@ -2040,6 +2242,9 @@ class AgentLoop:
                     "agent_continuation_output_type": "prose",
                     "direct_agent_prose_adopted": True,
                     "parsed_tool_call_count": 0,
+                    "task_outcome_status": task_state.metadata[
+                        "task_outcome_status"
+                    ],
                 }
                 trace.add_event(
                     step,
@@ -2052,6 +2257,7 @@ class AgentLoop:
 
             terminal_applied = AppliedToolOutcome(False)
             deferred_memory_notes: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+            instruction_claims: set[str] = set()
             for index, tool_call in enumerate(tool_calls):
                 task_state.metadata["pending_tool_call_count"] = len(tool_calls) - index
                 envelope = build_structured_tool_call_envelope(tool_call, mcp_registry=getattr(self, "mcp_registry", None))
@@ -2172,6 +2378,13 @@ class AgentLoop:
                         tool_name=tool_name,
                         success=observation_envelope.success,
                     )
+                self._attach_nearby_instruction_context(
+                    observation_envelope,
+                    project_root=instruction_project_root,
+                    system_paths=active_request_instruction_paths,
+                    loaded_paths=visible_instruction_paths,
+                    claimed_paths=instruction_claims,
+                )
                 observation = observation_to_legacy_dict(observation_envelope)
                 grant_status = (
                     GRANT_COMPLETED
@@ -2254,7 +2467,6 @@ class AgentLoop:
                         tool_name=tool_name,
                         success=observation_envelope.success,
                     )
-                raw_observation_json = json.dumps(observation, ensure_ascii=False, separators=(",", ":"))
                 capability_update = update_primary_capability_satisfied(
                     task_state,
                     tool_name=tool_name,
@@ -2453,21 +2665,7 @@ class AgentLoop:
                     tool_name=tool_name,
                     success=observation_envelope.success,
                 )
-                observation_json = raw_observation_json
                 model_observation_json = str(compacted_observation.get("model_observation_json") or "")
-                model_observation_json, pruning_decision = prune_observation_for_model_context(
-                    model_observation_json,
-                    tool_name=tool_name,
-                    runtime_lane=str(task_state.metadata.get("runtime_lane") or ""),
-                    task_state=task_state,
-                    tool_call_id=tool_call.id,
-                )
-                trace.add_event(
-                    step,
-                    "observation_pruning",
-                    json.dumps(pruning_decision.to_dict(), ensure_ascii=False),
-                    tool_name=tool_name,
-                )
                 self._print_json_block("Observation", observation_to_trace_dict(observation_envelope))
 
                 self.memory.add_tool_observation(
@@ -2654,13 +2852,50 @@ class AgentLoop:
         task_state: TaskState,
         trace: AgentTrace,
         metrics: RuntimeMetrics,
+        *,
+        project_root: Path,
     ) -> str:
         """Run one lightweight chat-only model call with no tools."""
 
+        request_guidance = resolve_request_guidance(
+            project_root=project_root,
+            persistent_memory=self.persistent_memory,
+        )
+        request_guidance_transition = resolve_request_guidance_transition(
+            request_guidance,
+            previous_effective_fingerprint=(
+                self._last_request_guidance_fingerprint
+            ),
+        )
+        reference_guidance = resolve_memory_reference_guidance(
+            persistent_memory=self.persistent_memory,
+        )
+        trace.add_event(
+            1,
+            "request_guidance_resolved",
+            "Request guidance resolved for the simple fast path.",
+            success=True,
+            data=request_guidance_trace_payload(
+                request_guidance,
+                stage="simple_fast_path",
+                resolution_mode="fresh",
+                guidance_changed_since_previous_request=(
+                    request_guidance_transition.guidance_changed_since_previous_request
+                ),
+                transition_note_included=(
+                    request_guidance_transition.transition_note_included
+                ),
+            ),
+        )
         messages = build_simple_chat_messages(
             self.memory,
             user_input,
             identity_note=build_runtime_model_identity_note(settings.llm_provider, settings.llm_model),
+            request_guidance_messages=[
+                *request_guidance.system_messages,
+                *request_guidance_transition.system_messages,
+            ],
+            reference_guidance_messages=list(reference_guidance.system_messages),
         )
         final_answer_options = resolve_llm_call_options("final_answer", settings)
         context_budget_started = time.perf_counter()
@@ -2700,6 +2935,9 @@ class AgentLoop:
                 messages=messages,
                 tools=[],
                 options=final_answer_options,
+            )
+            self._last_request_guidance_fingerprint = (
+                request_guidance.effective_guidance_fingerprint
             )
         except Exception as exc:
             metrics.record_llm_call(
@@ -2756,6 +2994,7 @@ class AgentLoop:
         task_state.is_finished = True
         task_state.mark_step_completed("final_summary", "Assistant produced simple chat final answer.")
         task_state.mark_step_completed("summarize_result", "Assistant produced simple chat final answer.")
+        task_state.metadata["task_outcome_status"] = "completed"
         record_final_answer_path_once(
             trace,
             1,
@@ -2779,16 +3018,19 @@ class AgentLoop:
         current = outcome
 
         if current.kind == "terminal_policy_blocked":
+            task_state.metadata["task_outcome_status"] = "blocked"
             task_state.is_finished = True
             task_state.mark_step_completed("final_summary", "Tool outcome resolved to policy blocked.")
             final_answer = self._build_final_answer_from_terminal_outcome(task_state, current, trace, step)
             return AppliedToolOutcome(True, final_answer, current.kind)
         if current.kind == "terminal_failure":
+            task_state.metadata["task_outcome_status"] = "failed"
             task_state.is_finished = True
             task_state.mark_step_completed("final_summary", "Tool outcome resolved to terminal failure.")
             final_answer = self._build_final_answer_from_terminal_outcome(task_state, current, trace, step)
             return AppliedToolOutcome(True, final_answer, current.kind)
         if current.kind == "terminal_success":
+            task_state.metadata["task_outcome_status"] = "completed"
             task_state.is_finished = True
             task_state.mark_step_completed("file_output", "Tool outcome resolved to completed file output.")
             task_state.mark_step_completed("write_output_file", "Tool outcome resolved to completed file output.")
@@ -2817,22 +3059,9 @@ class AgentLoop:
                 reason="previous_tool_completed_task",
                 terminal_kind=terminal_kind,
             )
-            observation_json = observation_to_model_message_json(
+            model_observation_json = observation_to_model_message_json(
                 observation_envelope,
                 runtime_lane=str(task_state.metadata.get("runtime_lane") or ""),
-            )
-            model_observation_json, pruning_decision = prune_observation_for_model_context(
-                observation_json,
-                tool_name=tool_name,
-                runtime_lane=str(task_state.metadata.get("runtime_lane") or ""),
-                task_state=task_state,
-                tool_call_id=tool_call.id,
-            )
-            trace.add_event(
-                step,
-                "observation_pruning",
-                json.dumps(pruning_decision.to_dict(), ensure_ascii=False),
-                tool_name=tool_name,
             )
             self.memory.add_tool_observation(
                 tool_call_id=tool_call.id,
@@ -2885,6 +3114,7 @@ class AgentLoop:
             success=True,
         )
         task_state.is_finished = True
+        task_state.metadata["task_outcome_status"] = "completed"
         task_state.mark_step_completed("final_summary", "Terminal file-read finalization adopted final answer.")
         task_state.mark_step_completed("summarize_result", "Terminal file-read finalization adopted final answer.")
         self._print_block("Action", "finish")
@@ -3246,13 +3476,17 @@ class AgentLoop:
     ) -> FinalizationContextSnapshot:
         """Build one task-local snapshot; recording happens after budgeting."""
 
-        return build_finalization_context_snapshot(
+        snapshot = build_finalization_context_snapshot(
             user_request=str(getattr(task_state, "user_goal", "") or ""),
             task_state=task_state,
             outcome=outcome,
             finalization_mode=finalization_mode,
             finalization_reason=finalization_reason,
         )
+        task_state.metadata["task_outcome_status"] = str(
+            snapshot.model_context.get("final_status") or "failed"
+        )
+        return snapshot
 
     def _budget_and_record_finalization_snapshot(
         self,
@@ -3516,16 +3750,19 @@ class AgentLoop:
     def _finish_with_trace(self, trace: AgentTrace, task_state: TaskState, final_answer: str) -> str:
         """Persist trace and optionally print a debug summary before returning."""
 
+        outcome_status = str(task_state.metadata.get("task_outcome_status") or "")
+        if outcome_status not in {
+            "completed",
+            "partially_completed",
+            "blocked",
+            "stopped",
+            "failed",
+            "incomplete_evidence",
+        }:
+            task_state.metadata["task_outcome_status"] = "incomplete_evidence"
         self.memory.ensure_task_final_assistant_message(task_state.task_id, final_answer)
         self._save_task_history_after_task(task_state, final_answer)
         self.memory.save_task_intent_summary(task_state)
-        if task_state.memory_delete_result:
-            metrics = self._runtime_metrics
-            if metrics is None:
-                final_answer = format_memory_delete_result(task_state.memory_delete_result)
-            else:
-                with metrics.measure("final_answer_ms"):
-                    final_answer = format_memory_delete_result(task_state.memory_delete_result)
         trace.add_event(
             0,
             "final",
@@ -3535,7 +3772,7 @@ class AgentLoop:
                 f"search_queries={task_state.research_queries} "
                 f"visited_urls={task_state.fetched_urls}"
             ),
-            success=task_state.is_finished,
+            success=task_state.metadata.get("task_outcome_status") == "completed",
         )
         metrics = self._runtime_metrics
         if metrics is not None:
@@ -3575,26 +3812,27 @@ class AgentLoop:
         task_state: TaskState,
         final_answer: str,
     ) -> None:
-        """Save ordinary task history unless a Memory ToolCall already ran."""
+        """Save a Runtime-owned task record except for Memory-management-only turns."""
 
-        if task_state.metadata.get("memory_tool_attempted") is True:
+        if _is_memory_management_only_task(task_state):
+            task_state.metadata["task_history_saved"] = False
             return
         task_summary = self._build_task_summary(task_state, final_answer)
         result = self.persistent_memory.add_task_summary(task_summary)
-        if result.get("success"):
-            task_state.memory_saved = True
-            if "task_summary" not in task_state.saved_memory_types:
-                task_state.saved_memory_types.append("task_summary")
+        task_state.metadata["task_history_saved"] = result.get("success") is True
 
     def _build_task_summary(self, task_state: TaskState, final_answer: str) -> dict[str, Any]:
         """Build a compact task history entry."""
 
-        if task_state.is_finished:
+        outcome_status = str(task_state.metadata.get("task_outcome_status") or "")
+        if outcome_status == "completed":
             result = "completed"
-        elif task_state.modified_files or task_state.research_queries or task_state.fetched_urls:
+        elif outcome_status == "partially_completed":
             result = "partial"
+        elif outcome_status in {"blocked", "stopped", "failed", "incomplete_evidence"}:
+            result = outcome_status
         else:
-            result = "failed"
+            result = "incomplete_evidence"
         summary = _compact_summary(final_answer or task_state.current_phase)
         return {
             "task_id": task_state.task_id,
@@ -3604,7 +3842,7 @@ class AgentLoop:
             "summary": summary,
             "modified_files": task_state.modified_files,
             "created_at": utc_now(),
-            "source": "agent_loop",
+            "source": "task_record",
         }
 
     def _execute_tool(
@@ -3892,6 +4130,9 @@ class AgentLoop:
                     source="agent_loop",
                 ):
                     result = tool(**_dispatch_arguments(tool, arguments))
+            elif base_tool in MEMORY_MUTATION_TOOLS:
+                with memory_mutation_context(task_state):
+                    result = tool(**_dispatch_arguments(tool, arguments))
             else:
                 result = tool(**_dispatch_arguments(tool, arguments))
             observation = normalize_tool_result(envelope, result)
@@ -3916,7 +4157,11 @@ class AgentLoop:
             )
             if base_tool == "switch_workspace" and observation.success:
                 self.workspace = get_current_workspace()
-                self.persistent_memory = PersistentMemory(memory_dir=self.workspace.memory_dir)
+                self.persistent_memory = PersistentMemory(
+                    database_path=self.workspace.database_path,
+                    user_id=self.workspace.user_id,
+                    project_id=self.workspace.project_id,
+                )
                 self.document_store = DocumentStore(document_dir=self.workspace.document_dir)
                 self.rag_engine = RAGEngine(self.document_store)
                 task_state.user_id = self.workspace.user_id
@@ -4076,6 +4321,48 @@ class AgentLoop:
             task_state.record_rag_retrieval_failure(tool_name, observation)
         if self._should_record_validation(task_state, base_tool):
             task_state.record_validation(tool_name, observation)
+
+    @staticmethod
+    def _attach_nearby_instruction_context(
+        observation: ToolObservation,
+        *,
+        project_root: Path,
+        system_paths: Any,
+        loaded_paths: Any,
+        claimed_paths: set[str],
+    ) -> None:
+        """Attach nearby rules only to a successful, real local-file Read observation."""
+
+        if not observation.success:
+            return
+        metadata = observation.metadata if isinstance(observation.metadata, dict) else {}
+        target = str(metadata.get("instruction_discovery_path") or "").strip()
+        if not target or metadata.get("resource_type") != "file":
+            return
+        context = resolve_nearby_instruction_context(
+            target,
+            project_root=project_root,
+            system_paths=system_paths,
+            loaded_paths=loaded_paths,
+            claimed_paths=claimed_paths,
+        )
+        claimed_paths.update((*context.paths, *context.unavailable_paths))
+        sources = [
+            {
+                "path": source.path,
+                "content": source.content,
+                "applies_to": str(Path(target).expanduser().resolve()),
+            }
+            for source in context.sources
+        ]
+        loaded = [source["path"] for source in sources]
+        observation.metadata["loaded_instruction_paths"] = loaded
+        if context.unavailable_paths:
+            observation.metadata["unavailable_instruction_paths"] = list(
+                context.unavailable_paths
+            )
+        if sources:
+            observation.data["nearby_instructions"] = sources
 
     def _record_side_effects(
         self,
@@ -4283,18 +4570,13 @@ class AgentLoop:
             elif data.get("message"):
                 task_state.suggested_commit_message = str(data["message"])
 
-        if tool_name in {
-            "remember_user_preference",
-            "remember_stable_fact",
-            "remember_project_summary",
-            "forget_memory",
-            "clear_memory_type",
-        }:
-            if tool_name == "forget_memory":
-                task_state.memory_delete_result = observation
-            task_state.memory_saved = tool_name not in {"forget_memory", "clear_memory_type"}
-            if tool_name not in task_state.saved_memory_types:
-                task_state.saved_memory_types.append(tool_name)
+        if tool_name in MEMORY_MUTATION_TOOLS:
+            task_state.metadata["memory_mutation_succeeded"] = True
+            if tool_name in MEMORY_SAVE_UPDATE_TOOLS:
+                task_state.memory_saved = True
+                memory_type = MEMORY_TYPE_BY_SAVE_UPDATE_TOOL[tool_name]
+                if memory_type not in task_state.saved_memory_types:
+                    task_state.saved_memory_types.append(memory_type)
 
         if tool_name in {
             "load_document",

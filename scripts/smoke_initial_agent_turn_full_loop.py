@@ -29,7 +29,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.loop import AgentLoop
+import core.loop as loop_module
+from core.instruction_context import (
+    load_initial_instruction_context,
+    resolve_nearby_instruction_context,
+)
 from core.memory import Memory
+from core.path_grounding import build_path_context
+from core.persistent_memory import PersistentMemory
 from providers.mock import MockProvider, assistant_message
 from core.workspace import WorkspaceManager
 from core.workspace_runtime import set_current_workspace
@@ -72,12 +79,50 @@ def test_session_history() -> None:
     loop, llm, captured = _loop([assistant_message("你喜欢草莓味。")], memory)
     assert loop.run("我刚才说我喜欢什么味？") == "你喜欢草莓味。"
     messages = llm.calls[0]["messages"]
+    assert any("root instruction" in str(message.get("content") or "") for message in messages)
+    assert not any("launcher instruction" in str(message.get("content") or "") for message in messages)
     assert any(message.get("content") == "我喜欢草莓味。" for message in messages)
     assert any(message.get("content") == "记住了。" for message in messages)
     assert sum(message.get("content") == "我刚才说我喜欢什么味？" for message in messages) == 1
     assert any("Runtime model identity:" in str(message.get("content") or "") for message in messages)
     assert _stages(llm) == ["initial_agent_turn"]
     assert not any(event.event_type == "initial_agent_turn_failure" for event in captured["trace"].events)
+
+
+def test_persistent_context_is_visible_on_first_turn() -> None:
+    assert _FIXTURE_ROOT is not None
+    persistent = PersistentMemory(
+        database_path=_FIXTURE_ROOT / "horizon.db",
+        user_id="fixture-user",
+        project_id="fixture-project",
+    )
+    persistent.add_user_preference("answer_style", "用简洁中文回答")
+    persistent.add_stable_fact(
+        "Horizon memory reference fixture",
+        "Horizon reference fixture",
+    )
+    loop, llm, _ = _loop([assistant_message("首轮已读取指导。")])
+    loop.persistent_memory = persistent
+    assert loop.run("直接回答") == "首轮已读取指导。"
+    messages = llm.calls[0]["messages"]
+    contents = "\n".join(str(message.get("content") or "") for message in messages)
+    assert "answer_style: 用简洁中文回答" in contents
+    assert "Memory references are available" in contents
+    tool_names = {schema["function"]["name"] for schema in llm.calls[0]["tools"]}
+    assert {"search_memory_references", "read_memory_reference"}.issubset(tool_names)
+
+
+def test_local_instruction_hierarchy() -> None:
+    assert _FIXTURE_ROOT is not None
+    initial = load_initial_instruction_context(_FIXTURE_ROOT)
+    context = resolve_nearby_instruction_context(
+        _FIXTURE_ROOT / "core" / "trace.py",
+        project_root=_FIXTURE_ROOT,
+        system_paths=initial.paths,
+    )
+    assert "root instruction" not in context.content
+    assert "core instruction" in context.content
+    assert [Path(path).name for path in context.paths] == ["HORIZON.md"]
 
 
 def test_two_read_file_calls_use_generic_final() -> None:
@@ -193,6 +238,38 @@ def test_one_read_file_uses_agent_owned_continuation() -> None:
     assert captured["state"].metadata["direct_agent_prose_adopted"] is True
 
 
+def test_nearby_instruction_is_delivered_with_read_observation() -> None:
+    assert _FIXTURE_ROOT is not None
+    target = (_FIXTURE_ROOT / "core" / "trace.py").resolve()
+    loop, llm, _ = _loop(
+        [
+            assistant_message("", [_call("call_nearby", "read_file", {"path": str(target)})]),
+            assistant_message("附近规则已随读取结果生效。"),
+        ]
+    )
+    loop.tools["read_file"] = lambda path: {
+        "success": True,
+        "status": "success",
+        "data": {"path": path, "content": "trace content"},
+        "metadata": {
+            "path": path,
+            "instruction_discovery_path": path,
+            "resource_type": "file",
+        },
+    }
+    assert loop.run("读取 core/trace.py 并按附近规则回答") == "附近规则已随读取结果生效。"
+    continuation = llm.calls[1]["messages"]
+    tool_messages = [message for message in continuation if message.get("role") == "tool"]
+    assert len(tool_messages) == 1
+    payload = json.loads(str(tool_messages[0]["content"]))
+    assert "core instruction" in json.dumps(payload.get("nearby_instructions"), ensure_ascii=False)
+    assert "root instruction" not in json.dumps(payload.get("nearby_instructions"), ensure_ascii=False)
+    assert not any(
+        message.get("role") == "system" and "core instruction" in str(message.get("content") or "")
+        for message in continuation
+    )
+
+
 def test_one_read_document_uses_generic_final() -> None:
     loop, llm, captured = _loop(
         [
@@ -230,24 +307,44 @@ def test_one_read_document_uses_generic_final() -> None:
 def main() -> None:
     global _FIXTURE_ROOT
     original_cwd = Path.cwd()
+    original_build_path_context = loop_module.build_path_context
     try:
         with TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory) / "project_a"
+            launcher = Path(directory) / "launcher"
+            root.mkdir()
+            launcher.mkdir()
             _FIXTURE_ROOT = root
-            os.chdir(root)
-            context = WorkspaceManager(root).get_context("smoke", "initial-full-loop")
+            os.chdir(launcher)
+            path_context = build_path_context(project_root=root)
+            assert path_context.project_root == root.resolve()
+            assert path_context.process_cwd == launcher.resolve()
+            assert path_context.project_root != path_context.process_cwd
+            loop_module.build_path_context = lambda *_, **__: path_context
+            context = WorkspaceManager(root, database_path=root / "horizon.db").get_context(
+                "smoke",
+                "initial-full-loop",
+            )
             set_current_workspace(context)
+            (root / ".git").mkdir()
+            (root / "HORIZON.md").write_text("root instruction\n", encoding="utf-8")
+            (launcher / "HORIZON.md").write_text("launcher instruction\n", encoding="utf-8")
             core_dir = root / "core"
             core_dir.mkdir()
+            (core_dir / "HORIZON.md").write_text("core instruction\n", encoding="utf-8")
             for name in ("trace.py", "memory.py", "runtime_metrics.py"):
                 (core_dir / name).write_text(f"# isolated {name}\n", encoding="utf-8")
             (root / "sample.xlsx").write_bytes(b"document-smoke-fixture")
             test_session_history()
+            test_persistent_context_is_visible_on_first_turn()
+            test_local_instruction_hierarchy()
             test_two_read_file_calls_use_generic_final()
             test_read_file_and_sandbox_exec_use_independent_grants()
             test_one_read_file_uses_agent_owned_continuation()
+            test_nearby_instruction_is_delivered_with_read_observation()
             test_one_read_document_uses_generic_final()
     finally:
+        loop_module.build_path_context = original_build_path_context
         _FIXTURE_ROOT = None
         os.chdir(original_cwd)
         for key, value in _PREVIOUS_ENV.items():

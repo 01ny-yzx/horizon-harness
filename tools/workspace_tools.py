@@ -15,7 +15,12 @@ def get_workspace_status() -> dict[str, Any]:
     """Return safe counts and paths for the current workspace."""
 
     workspace = get_current_workspace()
-    memory = PersistentMemory(memory_dir=workspace.memory_dir)
+    memory = PersistentMemory(
+        database_path=workspace.database_path,
+        user_id=workspace.user_id,
+        project_id=workspace.project_id,
+    )
+    memory_health = memory.load_all()
     document_store = DocumentStore(document_dir=workspace.document_dir)
     documents = document_store.list_documents().get("data", {})
     chunks = document_store.list_chunks(limit=1).get("data", {})
@@ -27,13 +32,14 @@ def get_workspace_status() -> dict[str, Any]:
             "project_id": workspace.project_id,
             "workspace_id": workspace.workspace_id,
             "workspace_dir": str(workspace.workspace_dir),
-            "memory_dir_exists": workspace.memory_dir.exists(),
+            "database_path": str(workspace.database_path),
             "document_dir_exists": workspace.document_dir.exists(),
             "vector_dir_exists": workspace.vector_dir.exists(),
             "documents_count": int(documents.get("documents_count", 0) or 0) if isinstance(documents, dict) else 0,
             "chunks_count": int(chunks.get("chunks_count", 0) or 0) if isinstance(chunks, dict) else 0,
             "vectors_count": int(vectors.get("vectors_count", 0) or 0) if isinstance(vectors, dict) else 0,
-            "memory_counts": memory.get_counts(),
+            "memory_counts": memory.get_counts() if memory_health.get("success") else {},
+            "persistent_memory_healthy": memory_health.get("success") is True,
         },
     }
 

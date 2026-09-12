@@ -63,12 +63,29 @@ def should_use_simple_fast_path(
     return SimpleFastPathDecision(True, "runtime_lane_chat_without_tools", metadata)
 
 
-def build_simple_chat_messages(memory: Any, user_input: str, *, identity_note: str = "") -> list[dict[str, Any]]:
+def build_simple_chat_messages(
+    memory: Any,
+    user_input: str,
+    *,
+    identity_note: str = "",
+    request_guidance_messages: list[dict[str, Any]] | None = None,
+    reference_guidance_messages: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """Build lightweight chat messages without the full runtime system prompt."""
 
     messages: list[dict[str, Any]] = [{"role": "system", "content": SIMPLE_CHAT_SYSTEM_PROMPT}]
     if identity_note:
         messages.append({"role": "system", "content": identity_note})
+    messages.extend(
+        dict(message)
+        for message in request_guidance_messages or []
+        if isinstance(message, dict)
+    )
+    messages.extend(
+        dict(message)
+        for message in reference_guidance_messages or []
+        if isinstance(message, dict)
+    )
     for message in getattr(memory, "messages", []) or []:
         filtered = _simple_history_message(message)
         if filtered is not None:

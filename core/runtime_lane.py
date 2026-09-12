@@ -114,6 +114,8 @@ READ_TOOLS = {
     "list_chunks",
     "semantic_search_chunks",
     "hybrid_search_chunks",
+    "search_memory_references",
+    "read_memory_reference",
 }
 EDIT_TOOLS = {"write_file", "replace_in_file"}
 EXEC_TOOLS = {"sandbox_exec"}

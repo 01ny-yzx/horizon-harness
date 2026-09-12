@@ -27,8 +27,8 @@ def get_current_workspace() -> WorkspaceContext:
     return _CURRENT_WORKSPACE
 
 
-def get_memory_dir() -> Path:
-    return get_current_workspace().memory_dir
+def get_database_path() -> Path:
+    return get_current_workspace().database_path
 
 
 def get_document_dir() -> Path:

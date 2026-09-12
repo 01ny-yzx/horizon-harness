@@ -62,6 +62,7 @@ def _read_execution_metadata(
     decision: FileAccessDecision | None,
     *,
     fallback_path: str = "",
+    instruction_discovery: bool = False,
 ) -> dict[str, Any]:
     """Return a detached execution-audit payload for file reads."""
 
@@ -75,6 +76,9 @@ def _read_execution_metadata(
         path_value = str(fallback_path or "").strip()
     if path_value:
         metadata["path"] = path_value
+        if instruction_discovery:
+            metadata["instruction_discovery_path"] = path_value
+            metadata["resource_type"] = "file"
     return metadata
 
 
@@ -259,7 +263,11 @@ def read_file(path: str, raw_requested_path: str | None = None) -> dict[str, Any
         return {
             "success": True,
             "data": content,
-            "metadata": _read_execution_metadata(decision, fallback_path=str(target)),
+            "metadata": _read_execution_metadata(
+                decision,
+                fallback_path=str(target),
+                instruction_discovery=True,
+            ),
         }
     except UnicodeDecodeError:
         return _read_file_failure_response(
@@ -307,6 +315,12 @@ def read_document(
         "path_grounding": decision.path_grounding,
     }
     if result.success:
+        execution_metadata.update(
+            {
+                "instruction_discovery_path": str(decision.resolved_path),
+                "resource_type": "file",
+            }
+        )
         return {"success": True, "data": payload, "metadata": execution_metadata}
     error = result.error or {"code": "document_read_failed", "message": "读取文档失败。"}
     return {

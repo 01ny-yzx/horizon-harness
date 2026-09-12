@@ -19,6 +19,6 @@ Document and RAG rules:
 8. Do not invent chunk_id, file_name, heading, score, or evidence. Present document evidence naturally from retrieved chunks, and include all necessary evidence directly in the answer without forcing a fixed evidence section.
 9. Do not output embedding arrays.
 10. Do not claim the full text was analyzed unless the relevant document was loaded and chunks were retrieved.
-11. Do not read .env, secret files, memory_store, document_store, vector_store, .venv, caches, or unsupported binary formats.
+11. Do not read .env, secret files, Horizon internal persistent-memory/database files, document_store, vector_store, .venv, caches, or unsupported binary formats.
 12. Current supported file types are .txt, .md, .json, .csv, .py, .html, and .htm. PDF, DOCX, PPTX, images, and OCR are not supported in Document Loader v1.
 """.strip()

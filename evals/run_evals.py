@@ -198,7 +198,11 @@ def _structured_state(profile: TaskProfile) -> TaskState:
 def _run_memory_deletion_evals() -> list[tuple[str, list[str]]]:
     results: list[tuple[str, list[str]]] = []
     with TemporaryDirectory() as tmp:
-        memory = PersistentMemory(Path(tmp) / "memory_store")
+        memory = PersistentMemory(
+            database_path=Path(tmp) / "horizon.db",
+            user_id="eval_user",
+            project_id="memory_deletion",
+        )
 
         errors = []
         save_result = memory.add_user_preference("answer_language", "尽量用温柔的中文解释，语言简单一点")
@@ -217,22 +221,22 @@ def _run_memory_deletion_evals() -> list[tuple[str, list[str]]]:
                 "summary": "你之前让我存好的偏好是：尽量用温柔的中文解释，语言简单一点",
             }
         )
-        delete_result = memory.forget_memory("all", "删除这个偏好")
+        delete_result = memory.delete_user_preference("answer_language")
         data = delete_result.get("data", {})
         errors = []
         if data.get("deleted", 0) <= 0:
             errors.append("delete_style_preference deleted 0")
         if memory.get_user_memory().get("preferences"):
             errors.append("preferences not empty after delete")
-        results.append(("delete_style_preference", errors))
+        results.append(("delete_exact_preference", errors))
 
         memory.add_user_preference("answer_language", "尽量用温柔的中文解释，语言简单一点")
-        delete_result = memory.forget_memory("all", "忘记我之前的回答风格偏好")
+        delete_result = memory.delete_user_preference("answer_language")
         data = delete_result.get("data", {})
         errors = []
-        if "answer_language" not in data.get("deleted_preferences", []):
-            errors.append("answer style alias did not delete answer_language")
-        results.append(("delete_answer_style_preference", errors))
+        if data.get("key") != "answer_language" or data.get("deleted") != 1:
+            errors.append("exact preference delete did not delete answer_language")
+        results.append(("delete_exact_preference_repeat", errors))
 
         errors = []
         prompt = memory.format_for_prompt()
@@ -464,7 +468,11 @@ def _run_rag_evals() -> list[tuple[str, list[str]]]:
 
     engine = ContextFusionEngine()
     with TemporaryDirectory() as tmp:
-        memory = PersistentMemory(Path(tmp) / "memory_store")
+        memory = PersistentMemory(
+            database_path=Path(tmp) / "horizon.db",
+            user_id="eval_user",
+            project_id="context_priority",
+        )
         memory.add_project_summary("proj", "项目没有 RAG，只有普通聊天。", ["Python"], "old")
         state = _structured_state(_structured_profile(needs_rag=True))
         state.rag_used = True
@@ -491,7 +499,11 @@ def _run_rag_evals() -> list[tuple[str, list[str]]]:
         results.append(("context_priority_rag_over_memory", errors))
 
     with TemporaryDirectory() as tmp:
-        memory = PersistentMemory(Path(tmp) / "memory_store")
+        memory = PersistentMemory(
+            database_path=Path(tmp) / "horizon.db",
+            user_id="eval_user",
+            project_id="memory_evidence",
+        )
         memory.add_user_preference("answer_style", "用简洁中文回答")
         state = _structured_state(_structured_profile(needs_rag=True))
         state.rag_used = True
@@ -500,12 +512,16 @@ def _run_rag_evals() -> list[tuple[str, list[str]]]:
         errors = []
         if state.rag_enough_evidence is not False or state.retrieved_chunks:
             errors.append("memory was treated as retrieved document evidence")
-        if not any(item.get("memory_type") == "user_preference" for item in memory_evidence):
-            errors.append("memory evidence lost its structured memory source type")
+        if memory_evidence:
+            errors.append("explicit guidance was duplicated into fused context")
         results.append(("memory_not_document_evidence", errors))
 
     with TemporaryDirectory() as tmp:
-        memory = PersistentMemory(Path(tmp) / "memory_store")
+        memory = PersistentMemory(
+            database_path=Path(tmp) / "horizon.db",
+            user_id="eval_user",
+            project_id="query_rewrite",
+        )
         memory.add_project_summary("proj", "Python Agent 包含 Persistent Memory、RAG、Document Loader。", ["Python"], "active")
         summary = compact_memory_summary(memory)
         rewrite = RAGEngine().rewrite_query_with_memory("根据我的项目文档回答记忆模块是什么", summary)
@@ -514,23 +530,33 @@ def _run_rag_evals() -> list[tuple[str, list[str]]]:
         errors = []
         if not all(term in joined for term in ["Persistent Memory", "长期记忆"]):
             errors.append(f"memory-aware rewrite missing memory terms: {joined}")
-        if "memory_store" not in joined:
-            errors.append(f"memory-aware rewrite missing memory_store: {joined}")
+        if "memory_store" in joined or "user_memory.json" in joined:
+            errors.append(f"memory-aware rewrite leaked backend terms: {joined}")
         results.append(("memory_aware_query_rewrite", errors))
 
     with TemporaryDirectory() as tmp:
-        memory = PersistentMemory(Path(tmp) / "memory_store")
+        memory = PersistentMemory(
+            database_path=Path(tmp) / "horizon.db",
+            user_id="eval_user",
+            project_id="task_reference",
+        )
         memory.add_task_summary({"task_id": "t1", "task_type": "simple", "goal": "用户喜欢非常长的回答", "result": "completed", "summary": "用户喜欢非常长的回答"})
         evidence = ContextFusionEngine.memory_evidence(memory)
+        search_result = memory.search_memory_references("回答", limit=5)
+        references = search_result.get("data", {}).get("references", [])
         errors = []
-        if any(item.get("memory_type") == "user_preference" for item in evidence):
-            errors.append("task history was treated as user preference")
-        if not any(item.get("memory_type") == "task_history" and item.get("confidence") == "low" for item in evidence):
-            errors.append("task history should be low-confidence background")
-        results.append(("task_history_weak_background", errors))
+        if any(item.get("memory_type") == "task_history" for item in evidence):
+            errors.append("task history was injected into fused context")
+        if not any(item.get("memory_type") == "task_history" for item in references):
+            errors.append("task history was not available through explicit search")
+        results.append(("task_history_on_demand_reference", errors))
 
     with TemporaryDirectory() as tmp:
-        memory = PersistentMemory(Path(tmp) / "memory_store")
+        memory = PersistentMemory(
+            database_path=Path(tmp) / "horizon.db",
+            user_id="eval_user",
+            project_id="context_limit",
+        )
         memory.add_project_summary("proj", "A" * 3000 + " API_KEY=secret", ["Python"], "active")
         state = _structured_state(_structured_profile(needs_rag=True))
         large_chunk = {"chunk_id": "c", "file_name": "README.md", "heading": "RAG", "text": "B" * 3000, "evidence_quality": "high"}
@@ -553,7 +579,10 @@ def _run_workspace_evals() -> list[tuple[str, list[str]]]:
     original_workspace = get_current_workspace()
 
     with TemporaryDirectory() as tmp:
-        manager = WorkspaceManager(root_dir=Path(tmp) / "workspace_store")
+        manager = WorkspaceManager(
+            root_dir=Path(tmp) / "workspace_store",
+            database_path=Path(tmp) / "horizon.db",
+        )
 
         errors = []
         try:
@@ -567,21 +596,35 @@ def _run_workspace_evals() -> list[tuple[str, list[str]]]:
         errors = []
         if context.user_id != "default_user" or context.project_id != "default_project":
             errors.append(f"unexpected default ids: {context.user_id}/{context.project_id}")
-        if context.memory_dir.name != "memory_store" or context.document_dir.name != "document_store" or context.vector_dir.name != "vector_store":
+        if context.document_dir.name != "document_store" or context.vector_dir.name != "vector_store":
             errors.append("default store directories are incorrect")
+        if context.database_path != (Path(tmp) / "horizon.db").resolve():
+            errors.append("workspace context lost the injected database authority")
         results.append(("workspace_default_context", errors))
 
         ctx_a = manager.get_context("user_a", "project_1")
+        ctx_a_second_project = manager.get_context("user_a", "project_2")
         ctx_b = manager.get_context("user_b", "project_1")
-        mem_a = PersistentMemory(ctx_a.memory_dir)
-        mem_b = PersistentMemory(ctx_b.memory_dir)
+        mem_a = PersistentMemory(ctx_a.database_path, ctx_a.user_id, ctx_a.project_id)
+        mem_a_second_project = PersistentMemory(
+            ctx_a_second_project.database_path,
+            ctx_a_second_project.user_id,
+            ctx_a_second_project.project_id,
+        )
+        mem_b = PersistentMemory(ctx_b.database_path, ctx_b.user_id, ctx_b.project_id)
         mem_a.add_user_preference("answer_style", "short")
+        mem_a.add_project_instruction("Use project-one conventions.")
+        mem_a_second_project.load_all()
         errors = []
         if "answer_style" not in mem_a.get_user_memory().get("preferences", {}):
             errors.append("workspace A did not save memory")
+        if "answer_style" not in mem_a_second_project.get_user_memory().get("preferences", {}):
+            errors.append("user preference was not shared across the same user's projects")
+        if mem_a_second_project.get_project_memory().get("instructions"):
+            errors.append("project instruction leaked into another project")
         if "answer_style" in mem_b.get_user_memory().get("preferences", {}):
             errors.append("workspace B saw workspace A memory")
-        results.append(("memory_isolated_by_workspace", errors))
+        results.append(("memory_user_and_project_scopes", errors))
 
         doc_a = DocumentStore(ctx_a.document_dir)
         doc_b = DocumentStore(ctx_b.document_dir)
@@ -632,9 +675,9 @@ def _run_workspace_evals() -> list[tuple[str, list[str]]]:
     results.append(("switch_workspace_runtime", errors))
 
     errors = []
-    real_data = PROJECT_ROOT / "workspace_store" / "eval_export_user" / "eval_project" / "memory_store"
+    real_data = PROJECT_ROOT / "workspace_store" / "eval_export_user" / "eval_project" / "traces"
     real_data.mkdir(parents=True, exist_ok=True)
-    (real_data / "user_memory.json").write_text('{"secret":"do-not-export"}', encoding="utf-8")
+    (real_data / "private-trace.json").write_text('{"secret":"do-not-export"}', encoding="utf-8")
     process = subprocess.run(
         [sys.executable, str(PROJECT_ROOT / "scripts" / "export_project.py")],
         cwd=PROJECT_ROOT,
@@ -648,7 +691,7 @@ def _run_workspace_evals() -> list[tuple[str, list[str]]]:
     else:
         with zipfile.ZipFile(PROJECT_ROOT / "dist" / "agent_export.zip") as archive:
             names = set(archive.namelist())
-        if "workspace_store/eval_export_user/eval_project/memory_store/user_memory.json" in names:
+        if "workspace_store/eval_export_user/eval_project/traces/private-trace.json" in names:
             errors.append("export included real workspace data")
         if "workspace_store/.gitkeep" not in names:
             errors.append("export did not preserve workspace placeholders")
@@ -673,7 +716,10 @@ def _run_api_evals() -> list[tuple[str, list[str]]]:
     results.append(("api_schemas_instantiate", errors))
 
     with TemporaryDirectory() as tmp:
-        manager = WorkspaceManager(root_dir=Path(tmp) / "workspace_store")
+        manager = WorkspaceManager(
+            root_dir=Path(tmp) / "workspace_store",
+            database_path=Path(tmp) / "horizon.db",
+        )
         context = manager.get_context("api_user", "api_project")
         errors = []
         if context.user_id != "api_user" or context.project_id != "api_project":

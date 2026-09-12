@@ -36,6 +36,7 @@ TASK_SCOPED_NOTE_TYPES = {
     "explicit_tool",
     "tool_schema_scope",
     "runtime_state",
+    "local_instructions",
 }
 
 
@@ -274,16 +275,6 @@ class Memory:
         ]
         self.add_system_note(safe_content, note_type="fused_context")
 
-    def add_long_term_memory_note(self, content: str) -> None:
-        """Replace older long-term memory notes with the latest note."""
-
-        self.messages = [
-            message
-            for message in self.messages
-            if message.get("metadata", {}).get("note_type") != "long_term_memory"
-        ]
-        self.add_system_note(content, note_type="long_term_memory")
-
     def _task_metadata(self, task_id: str | None = None) -> dict[str, str]:
         effective_task_id = task_id or self.current_task_id
         if not effective_task_id:
@@ -410,7 +401,11 @@ class Memory:
         except json.JSONDecodeError:
             return sanitize_unicode(self._truncate_text(observation_json, MAX_TEXT_CHARS))
 
-        compacted = self._compact_value(observation)
+        tool_name = str(observation.get("tool_name") or observation.get("tool") or "").rsplit(".", 1)[-1]
+        if tool_name == "read_memory_reference":
+            compacted = sanitize_unicode(observation)
+        else:
+            compacted = self._compact_value(observation)
         return sanitize_unicode(json.dumps(sanitize_unicode(compacted), ensure_ascii=False))
 
     def _compact_value(self, value: Any) -> Any:
@@ -429,7 +424,9 @@ class Memory:
         if isinstance(value, dict):
             result = {}
             for key, item in value.items():
-                if key in {"stdout", "stderr"} and isinstance(item, str):
+                if key == "nearby_instructions":
+                    result[key] = sanitize_unicode(item)
+                elif key in {"stdout", "stderr"} and isinstance(item, str):
                     result[key] = self._truncate_text(item, MAX_STDIO_CHARS)
                 elif key == "text" and isinstance(item, str):
                     result[key] = self._truncate_text(item, MAX_FETCH_TEXT_CHARS)

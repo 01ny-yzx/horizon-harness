@@ -42,6 +42,8 @@ def build_initial_agent_turn_pack(
     user_input: str,
     tools: list[dict[str, Any]],
     memory_messages: list[dict[str, Any]] | None = None,
+    request_guidance_messages: list[dict[str, Any]] | None = None,
+    reference_guidance_messages: list[dict[str, Any]] | None = None,
     runtime_model_identity_note: str = "",
     current_user_included: bool = False,
     agent_turn_context_summary: dict[str, Any] | None = None,
@@ -70,6 +72,8 @@ def build_initial_agent_turn_pack(
     messages = build_agent_turn_messages(
         system_instruction=system,
         memory_messages=memory_messages or [],
+        request_guidance_messages=request_guidance_messages or [],
+        reference_guidance_messages=reference_guidance_messages or [],
         current_user_input=user_input,
         runtime_model_identity_note=runtime_model_identity_note,
         context_notes=context_notes,
@@ -97,6 +101,8 @@ def build_tool_call_pack(
     task_state: Any,
     tools: list[dict[str, Any]],
     memory_messages: list[dict[str, Any]],
+    request_guidance_messages: list[dict[str, Any]] | None = None,
+    reference_guidance_messages: list[dict[str, Any]] | None = None,
     runtime_model_identity_note: str = "",
     current_user_included: bool = False,
     agent_turn_context_summary: dict[str, Any] | None = None,
@@ -109,6 +115,8 @@ def build_tool_call_pack(
         task_state=task_state,
         tools=tools,
         memory_messages=memory_messages,
+        request_guidance_messages=request_guidance_messages,
+        reference_guidance_messages=reference_guidance_messages,
         runtime_model_identity_note=runtime_model_identity_note,
         current_user_included=current_user_included,
         agent_turn_context_summary=agent_turn_context_summary,
@@ -122,6 +130,8 @@ def build_agent_continuation_pack(
     task_state: Any,
     tools: list[dict[str, Any]],
     memory_messages: list[dict[str, Any]],
+    request_guidance_messages: list[dict[str, Any]] | None = None,
+    reference_guidance_messages: list[dict[str, Any]] | None = None,
     runtime_model_identity_note: str = "",
     current_user_included: bool = False,
     agent_turn_context_summary: dict[str, Any] | None = None,
@@ -144,6 +154,8 @@ def build_agent_continuation_pack(
     messages = build_agent_turn_messages(
         system_instruction=system,
         memory_messages=memory_messages,
+        request_guidance_messages=request_guidance_messages or [],
+        reference_guidance_messages=reference_guidance_messages or [],
         current_user_input=user_input,
         runtime_model_identity_note=runtime_model_identity_note,
         current_user_included=current_user_included,
@@ -175,6 +187,8 @@ def build_agent_turn_messages(
     *,
     system_instruction: str,
     memory_messages: list[dict[str, Any]],
+    request_guidance_messages: list[dict[str, Any]] | None = None,
+    reference_guidance_messages: list[dict[str, Any]] | None = None,
     current_user_input: str,
     runtime_model_identity_note: str = "",
     context_notes: list[str] | None = None,
@@ -185,6 +199,16 @@ def build_agent_turn_messages(
     messages: list[dict[str, Any]] = [{"role": "system", "content": str(system_instruction or "").strip()}]
     if runtime_model_identity_note:
         messages.append({"role": "system", "content": str(runtime_model_identity_note)})
+    messages.extend(
+        dict(message)
+        for message in request_guidance_messages or []
+        if isinstance(message, dict)
+    )
+    messages.extend(
+        dict(message)
+        for message in reference_guidance_messages or []
+        if isinstance(message, dict)
+    )
     for note in context_notes or []:
         text = str(note or "").strip()
         if text:
@@ -351,6 +375,8 @@ def build_single_file_read_agent_continuation_pack(
     task_state: Any,
     tools: list[dict[str, Any]],
     memory_messages: list[dict[str, Any]],
+    request_guidance_messages: list[dict[str, Any]] | None = None,
+    reference_guidance_messages: list[dict[str, Any]] | None = None,
     runtime_model_identity_note: str = "",
     current_user_included: bool = False,
     access_mode: str | None = None,
@@ -362,6 +388,8 @@ def build_single_file_read_agent_continuation_pack(
         task_state=task_state,
         tools=tools,
         memory_messages=memory_messages,
+        request_guidance_messages=request_guidance_messages,
+        reference_guidance_messages=reference_guidance_messages,
         runtime_model_identity_note=runtime_model_identity_note,
         current_user_included=current_user_included,
         access_mode=access_mode,

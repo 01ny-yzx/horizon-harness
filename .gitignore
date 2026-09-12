@@ -44,6 +44,9 @@ frontend/.env.local
 
 # local stores
 memory_store/*.json
+horizon.db
+horizon.db-wal
+horizon.db-shm
 document_store/*.json
 vector_store/*.json
 workspace_store/**
@@ -58,8 +61,6 @@ playwright-report/
 test-results/
 
 # keep docs/placeholders
-!memory_store/
-!memory_store/.gitkeep
 !document_store/
 !document_store/.gitkeep
 !vector_store/
@@ -86,3 +87,4 @@ context_cache/*.json
 exports/
 
 .horizon_runtime_validation/
+.horizon-step6-data/

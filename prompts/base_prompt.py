@@ -16,7 +16,7 @@ def build_runtime_model_identity_note(provider: str, model: str) -> str:
         "This runtime identity is authoritative for the current process. "
         "When answering questions about the current Agent runtime model, provider, "
         "or configuration, use only this runtime identity. Do not infer model identity "
-        "from README, docs, document_store, memory_store, task_history, examples, "
+        "from README, docs, document_store, persistent memory, task history, examples, "
         "historical logs, project notes, or previous configurations. If memory or "
         "documents conflict with this runtime identity, ignore them for model identity."
     )

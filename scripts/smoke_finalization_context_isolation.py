@@ -13,7 +13,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.finalization_context_budget import apply_finalization_context_budget
-from core.finalization_context_snapshot import build_finalization_context_snapshot
+from core.finalization_context_snapshot import (
+    build_finalization_context_snapshot,
+    resolve_task_outcome_status_from_execution,
+)
 from core.loop import AgentLoop
 from core.memory import Memory
 from core.prompt_pack import (
@@ -307,6 +310,38 @@ def test_snapshot_projection_coverage_and_statuses() -> None:
     assert "hidden-fingerprint" not in stopped_rendered
 
 
+def test_resolved_failure_and_blocked_are_not_completed() -> None:
+    failed = _observation(
+        "failed-call",
+        "read_file",
+        success=False,
+        status="failed",
+        error_code="file_not_found",
+    )
+    failed_state = _state([failed])
+    failed_state.metadata["build_step_contract"] = {
+        "steps": [{"call_id": "failed-call", "status": "failed"}],
+        "completed_count": 0,
+        "failed_count": 1,
+        "blocked_count": 0,
+        "pending_count": 0,
+        "all_steps_completed": False,
+        "all_steps_resolved": True,
+    }
+    assert resolve_task_outcome_status_from_execution(failed_state) == "failed"
+
+    blocked = _observation(
+        "blocked-call",
+        "write_file",
+        success=False,
+        status="blocked",
+        error_code="write_blocked",
+        policy_code="write_blocked",
+    )
+    blocked_state = _state([blocked])
+    assert resolve_task_outcome_status_from_execution(blocked_state) == "blocked"
+
+
 def test_memory_does_not_fill_missing_result() -> None:
     present = _observation(
         "present-call",
@@ -405,6 +440,7 @@ def main() -> None:
         test_normal_agent_continuation_is_unchanged(root)
         test_ordinary_failure_stays_in_normal_agent_context(root)
     test_snapshot_projection_coverage_and_statuses()
+    test_resolved_failure_and_blocked_are_not_completed()
     test_memory_does_not_fill_missing_result()
     test_twenty_five_results_are_compacted_not_dropped()
     print("smoke_finalization_context_isolation ok")

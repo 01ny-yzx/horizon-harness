@@ -74,7 +74,6 @@ class TaskState:
     memory_used: bool = False
     memory_saved: bool = False
     saved_memory_types: list[str] = field(default_factory=list)
-    memory_delete_result: dict[str, Any] | None = None
     document_loaded: bool = False
     document_id: str = ""
     chunk_count: int = 0
@@ -167,7 +166,6 @@ class TaskState:
             "memory_used": self.memory_used,
             "memory_saved": self.memory_saved,
             "saved_memory_types": self.saved_memory_types,
-            "memory_delete_result": self.memory_delete_result,
             "document_loaded": self.document_loaded,
             "document_id": self.document_id,
             "chunk_count": self.chunk_count,
@@ -252,7 +250,6 @@ class TaskState:
             f"- memory_used: {self.memory_used}",
             f"- memory_saved: {self.memory_saved}",
             f"- saved_memory_types: {self.saved_memory_types or 'none'}",
-            f"- memory_delete_result: {self._format_memory_delete_result()}",
             f"- recent_tool_failures: {self._format_tool_failures()}",
             f"- consecutive_failures: {self.consecutive_failures}",
             "- plan:",
@@ -721,16 +718,6 @@ class TaskState:
             return "none"
         latest = self.rag_retrieval_failures[-1]
         return f"{latest.get('tool')}: {latest.get('error')}"
-
-    def _format_memory_delete_result(self) -> str:
-        """Return a compact memory deletion summary."""
-
-        if not self.memory_delete_result:
-            return "none"
-        data = self.memory_delete_result.get("data", {})
-        if not isinstance(data, dict):
-            return str(self.memory_delete_result.get("success"))
-        return f"deleted={data.get('deleted', 0)} preferences={data.get('deleted_preferences', [])}"
 
     def _format_file_output_result(self) -> str:
         if not self.file_output_result:

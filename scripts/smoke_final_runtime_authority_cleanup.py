@@ -21,7 +21,6 @@ from core.execution_boundary import evaluate_tool_execution_boundary
 from core.loop import AgentLoop
 from core.state import PlanStep, TaskState
 from core.task_profile import TaskProfile
-import tools.memory_tools as memory_tools
 
 
 class FakePersistentMemory:
@@ -30,13 +29,6 @@ class FakePersistentMemory:
 
     def add_task_summary(self, summary: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("add_task_summary", (summary,), {}))
-        return {"success": True}
-
-    def forget_memory(self, memory_type: str, keyword: str) -> dict[str, Any]:
-        self.calls.append(("forget_memory", (), {
-            "memory_type": memory_type,
-            "keyword": keyword,
-        }))
         return {"success": True}
 
     def add_user_preference(self, **kwargs: Any) -> dict[str, Any]:
@@ -109,39 +101,24 @@ def test_text_does_not_change_long_term_memory() -> None:
         state = _state(user_goal)
         _history_loop(memory)._save_task_history_after_task(state, "done")
         assert [item[0] for item in memory.calls] == ["add_task_summary"]
-        assert state.saved_memory_types == ["task_summary"]
+        assert state.saved_memory_types == []
+        assert state.metadata["task_history_saved"] is True
 
 
-def test_memory_tool_attempt_skips_task_summary() -> None:
+def test_memory_management_only_skips_task_summary() -> None:
     for tool_name in (
         "remember_user_preference",
-        "forget_memory",
-        "list_memories",
+        "delete_memory_reference",
+        "search_memory_references",
     ):
         memory = FakePersistentMemory()
         state = _state("ordinary request")
         state.metadata["memory_tool_attempted"] = True
+        state.metadata["completion_observations"] = [
+            {"tool": tool_name, "success": True, "status": "success"}
+        ]
         _history_loop(memory)._save_task_history_after_task(state, tool_name)
         assert memory.calls == []
-
-
-def test_forget_memory_keeps_explicit_keyword() -> None:
-    fake_memory = FakePersistentMemory()
-    original_memory = memory_tools._memory
-    memory_tools._memory = lambda: fake_memory
-    try:
-        assert memory_tools.forget_memory("all", "回答风格偏好")["success"] is True
-        assert fake_memory.calls[-1][2] == {
-            "memory_type": "all",
-            "keyword": "回答风格偏好",
-        }
-        explicit = "忘记我之前的回答风格偏好"
-        assert memory_tools.forget_memory("all", explicit)["success"] is True
-        assert fake_memory.calls[-1][2]["keyword"] == explicit
-        empty = memory_tools.forget_memory("all", "  ")
-        assert empty == {"success": False, "error": "keyword is required."}
-    finally:
-        memory_tools._memory = original_memory
 
 
 def _file_write_state(*, authorized: bool) -> TaskState:
@@ -259,8 +236,7 @@ def test_fetch_failure_records_observation_without_router_note() -> None:
 def main() -> None:
     try:
         test_text_does_not_change_long_term_memory()
-        test_memory_tool_attempt_skips_task_summary()
-        test_forget_memory_keeps_explicit_keyword()
+        test_memory_management_only_skips_task_summary()
         test_file_write_execution_ignores_legacy_plan_authority()
         test_fetch_failure_records_observation_without_router_note()
         print("smoke_final_runtime_authority_cleanup ok")

@@ -195,6 +195,20 @@ def _assert_normal_two_turn_exit(
     assert "normal_finalization" not in event_types
 
 
+def _task_history_result(state: Any, answer: str) -> str:
+    return str(AgentLoop.__new__(AgentLoop)._build_task_summary(state, answer)["result"])
+
+
+def _adopted_prose_event(captured: dict[str, Any]) -> Any:
+    return next(
+        event
+        for event in reversed(captured["trace"].events)
+        if event.event_type == "agent_continuation_result"
+        and isinstance(event.data, dict)
+        and event.data.get("direct_agent_prose_adopted") is True
+    )
+
+
 def test_registry_permission_surface() -> None:
     specs = get_local_tool_specs()
     schemas = get_local_tool_schemas()
@@ -238,6 +252,8 @@ def test_initial_prose_semantic_keywords_do_not_retry() -> None:
         event.event_type == "initial_agent_turn_retry"
         for event in captured["trace"].events
     )
+    assert captured["state"].metadata["task_outcome_status"] == "completed"
+    assert _task_history_result(captured["state"], answer) == "completed"
 
 
 def test_three_call_batch_has_one_followup_llm(root: Path) -> None:
@@ -272,6 +288,8 @@ def test_three_call_batch_has_one_followup_llm(root: Path) -> None:
         "read-2",
         "read-3",
     ]
+    assert captured["state"].metadata["task_outcome_status"] == "completed"
+    assert _task_history_result(captured["state"], answer) == "completed"
 
 
 def test_failure_batches_are_collected_before_followup(root: Path) -> None:
@@ -312,6 +330,60 @@ def test_failure_batches_are_collected_before_followup(root: Path) -> None:
             f"{code}-fail",
             f"{code}-ok",
         ]
+        assert captured["state"].metadata["task_outcome_status"] == "partially_completed"
+        assert _task_history_result(captured["state"], answer) == "partial"
+        assert _adopted_prose_event(captured).data["task_outcome_status"] == "partially_completed"
+
+
+def test_failed_prose_keeps_execution_outcome(root: Path) -> None:
+    missing = root / "missing-outcome.txt"
+    final_answer = "文件不存在，无法读取。"
+    answer, llm, captured, executed = _run(
+        [
+            _message("", [_call("missing-outcome", "read_file", {"path": str(missing)})]),
+            _message(final_answer),
+        ],
+        tools={
+            "read_file": lambda path, **_: _failed(
+                "file_not_found",
+                path=path,
+            )
+        },
+        request="读取不存在的文件",
+    )
+    _assert_normal_two_turn_exit(answer, llm, captured, final_answer)
+    assert [name for name, _ in executed] == ["read_file"]
+    state = captured["state"]
+    assert state.is_finished is True
+    assert state.metadata["direct_agent_prose_adopted"] is True
+    assert state.metadata["task_outcome_status"] == "failed"
+    assert _task_history_result(state, answer) == "failed"
+    assert _adopted_prose_event(captured).data["task_outcome_status"] == "failed"
+
+
+def test_incomplete_coverage_is_not_completed(root: Path) -> None:
+    target = root / "incomplete.txt"
+    target.write_text("ok", encoding="utf-8")
+
+    def add_missing_expected_call(state: Any) -> None:
+        call_ids = state.metadata.setdefault("structured_tool_call_ids", [])
+        if "missing-call" not in call_ids:
+            call_ids.append("missing-call")
+
+    answer, llm, captured, executed = _run(
+        [
+            _message("", [_call("present-call", "read_file", {"path": str(target)})]),
+            _message("已读取现有结果。"),
+        ],
+        tools={"read_file": real_read_file},
+        request="读取文件",
+        state_projection=add_missing_expected_call,
+    )
+    _assert_normal_two_turn_exit(answer, llm, captured, "已读取现有结果。")
+    assert [name for name, _ in executed] == ["read_file"]
+    assert captured["state"].metadata["task_outcome_status"] == "incomplete_evidence"
+    assert _task_history_result(captured["state"], answer) == "incomplete_evidence"
+    assert _adopted_prose_event(captured).data["task_outcome_status"] == "incomplete_evidence"
 
 
 def test_success_then_prose_ignores_legacy_completion_authority(root: Path) -> None:
@@ -465,6 +537,8 @@ def main() -> None:
             test_initial_prose_semantic_keywords_do_not_retry()
             test_three_call_batch_has_one_followup_llm(root)
             test_failure_batches_are_collected_before_followup(root)
+            test_failed_prose_keeps_execution_outcome(root)
+            test_incomplete_coverage_is_not_completed(root)
             test_success_then_prose_ignores_legacy_completion_authority(root)
             test_tool_calls_override_provider_stop(root)
             test_web_availability_is_re_resolved()

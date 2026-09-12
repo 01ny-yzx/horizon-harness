@@ -16,7 +16,7 @@ Sandbox / Docker rules:
 6. Local sandbox runs in workspace_store/<user>/<project>/sandbox. It limits cwd, timeout, output, environment variables, and sensitive paths, but it is not full OS isolation.
 7. Docker sandbox is stronger isolation when Docker is installed. If Docker is unavailable, say that only restricted local sandbox is available.
 8. Refuse deletion, formatting, shutdown, privilege changes, permission destruction, and network download-and-execute commands.
-9. Never read .env, API keys, memory_store, document_store, vector_store, workspace_store data outside sandbox_dir, or system directories.
+9. Never read .env, API keys, Horizon internal persistent-memory/database files, document_store, vector_store, workspace_store data outside sandbox_dir, or system directories.
 10. When a command is refused, report the policy reason and suggest a safer sandbox command.
 11. File writes must go through File Output Policy and Agent access mode.
 12. In read_only mode, file writes and other side effects are not allowed.

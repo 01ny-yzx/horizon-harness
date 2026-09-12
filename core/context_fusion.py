@@ -4,27 +4,12 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict, dataclass
 from typing import Any
 
 from core.persistent_memory import PersistentMemory
 
 
 SECRET_RE = re.compile(r"(?i)(api[_-]?key|password|passwd|token|secret)\s*[:=]|sk-[A-Za-z0-9_\-]{8,}|tvly-[A-Za-z0-9_\-]{8,}")
-
-
-@dataclass
-class MemoryEvidence:
-    """A compact memory item that may be used as background."""
-
-    memory_type: str
-    content: str
-    source: str = ""
-    updated_at: str = ""
-    confidence: str = "medium"
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
 
 
 class ContextFusionEngine:
@@ -35,9 +20,6 @@ class ContextFusionEngine:
         "rag_evidence",
         "current_user_input",
         "task_state",
-        "project_memory",
-        "user_memory",
-        "recent_task_history",
     ]
 
     def build_fused_context(
@@ -79,8 +61,8 @@ class ContextFusionEngine:
             sections = built.get("data", {}).get("sections", {})
         lines = [
             "Fused Context:",
-            "Priority: current Observation > RAG document evidence > user input > TaskState > project memory > user memory > recent task history.",
-            "Rules: RAG evidence is document evidence. Persistent Memory is background/preference unless the user asks about memory. Task history is weak background only.",
+            "Priority: current Observation > RAG document evidence > user input > TaskState.",
+            "Rules: RAG evidence is document evidence. Explicit persistent guidance is supplied separately at request time.",
         ]
         for name in ["current_task", "rag_evidence", "persistent_memory", "recent_tasks"]:
             content = (sections.get(name, "") if isinstance(sections, dict) else "").strip()
@@ -90,37 +72,12 @@ class ContextFusionEngine:
 
     @staticmethod
     def memory_evidence(persistent_memory: PersistentMemory) -> list[dict[str, Any]]:
-        """Extract compact memory evidence items."""
+        """Keep explicit persistent guidance out of fused model context."""
 
-        items: list[MemoryEvidence] = []
-        user = persistent_memory.get_user_memory()
-        preferences = user.get("preferences", {}) if isinstance(user, dict) else {}
-        if isinstance(preferences, dict):
-            for key, value in list(preferences.items())[:8]:
-                data = value if isinstance(value, dict) else {"value": value}
-                items.append(MemoryEvidence("user_preference", f"{key}: {data.get('value', '')}", data.get("source", ""), data.get("updated_at", ""), "medium"))
-        facts = user.get("stable_facts", []) if isinstance(user, dict) else []
-        if isinstance(facts, list):
-            for fact in facts[-5:]:
-                if isinstance(fact, dict):
-                    items.append(MemoryEvidence("stable_fact", str(fact.get("content", "")), str(fact.get("source", "")), str(fact.get("updated_at", "")), "medium"))
-        project = persistent_memory.get_project_memory()
-        projects = project.get("projects", []) if isinstance(project, dict) else []
-        if isinstance(projects, list):
-            for item in projects[-3:]:
-                if isinstance(item, dict):
-                    items.append(MemoryEvidence("project_summary", str(item.get("summary", "")), str(item.get("source", "")), str(item.get("updated_at", "")), "medium"))
-        for task in persistent_memory.get_prompt_safe_recent_tasks(limit=3):
-            items.append(
-                MemoryEvidence(
-                    "task_history",
-                    persistent_memory.safe_task_prompt_summary(task),
-                    str(task.get("source", "")),
-                    str(task.get("updated_at", "")),
-                    "low",
-                )
-            )
-        return [item.to_dict() for item in items if item.content]
+        loaded = persistent_memory.load_all()
+        if not loaded.get("success"):
+            return []
+        return []
 
     @staticmethod
     def _current_task_section(user_input: str, task_state: Any) -> str:
@@ -158,29 +115,19 @@ class ContextFusionEngine:
         return "\n".join(lines)
 
     def _persistent_memory_section(self, persistent_memory: PersistentMemory) -> str:
-        evidence = self.memory_evidence(persistent_memory)
-        if not evidence:
-            return "Persistent Memory: none"
-        lines = ["Memory background (not document evidence):"]
-        for item in evidence:
-            if item.get("memory_type") == "task_history":
-                continue
-            lines.append(f"- [{item.get('memory_type')}; confidence={item.get('confidence')}] {item.get('content')[:300]}")
-        return "\n".join(lines[:12])
+        self.memory_evidence(persistent_memory)
+        return ""
 
     @staticmethod
     def _recent_tasks_section(persistent_memory: PersistentMemory) -> str:
-        tasks = persistent_memory.get_prompt_safe_recent_tasks(limit=3)
-        if not tasks:
-            return "Recent task history: none"
-        lines = ["Recent task history (weak background only):"]
-        for task in tasks:
-            summary = persistent_memory.safe_task_prompt_summary(task)
-            lines.append(f"- [{task.get('task_type')}] {summary[:240]} ({task.get('result')})")
-        return "\n".join(lines)
+        del persistent_memory
+        return ""
 
 def compact_memory_summary(persistent_memory: PersistentMemory, max_chars: int = 1200) -> str:
     """Return a compact memory summary suitable for query rewrite."""
 
-    text = persistent_memory.format_for_prompt(max_chars=max_chars, include_task_history=False, mode="rag")
+    loaded = persistent_memory.load_all()
+    if not loaded.get("success"):
+        return ""
+    text = persistent_memory.format_instruction_context(max_chars=max_chars)
     return SECRET_RE.sub("[REDACTED]", text)[:max_chars]

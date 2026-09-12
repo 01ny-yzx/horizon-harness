@@ -166,6 +166,24 @@ def build_finalization_context_snapshot(
     return _snapshot_from_projections(model_context, trace_context)
 
 
+def resolve_task_outcome_status_from_execution(
+    task_state: Any,
+    *,
+    outcome: Any | None = None,
+    no_execution_status: str = "completed",
+) -> str:
+    """Resolve task outcome from the canonical finalization evidence boundary."""
+
+    snapshot = build_finalization_context_snapshot(
+        user_request=str(getattr(task_state, "user_goal", "") or ""),
+        task_state=task_state,
+        outcome=outcome,
+    )
+    if snapshot.result_count == 0 and snapshot.coverage_complete:
+        return str(no_execution_status or "completed")
+    return str(snapshot.model_context.get("final_status") or "incomplete_evidence")
+
+
 def rebuild_finalization_context_snapshot(
     snapshot: FinalizationContextSnapshot,
     *,
@@ -378,4 +396,5 @@ __all__ = [
     "build_finalization_context_snapshot",
     "finalization_snapshot_trace_summary",
     "rebuild_finalization_context_snapshot",
+    "resolve_task_outcome_status_from_execution",
 ]

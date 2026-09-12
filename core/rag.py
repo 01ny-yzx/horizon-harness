@@ -239,7 +239,7 @@ class RAGEngine:
         additions: list[str] = []
         lowered = f"{user_input}\n{memory_text}".lower()
         if any(term in lowered for term in ["memory", "记忆", "記憶"]):
-            additions.extend(["Persistent Memory", "长期记忆", "memory_store", "user_memory.json", "task_history"])
+            additions.extend(["Persistent Memory", "长期记忆", "task history"])
         if "rag" in lowered:
             additions.extend(["RAG", "检索增强生成", "rag_query", "Document Loader"])
         if "agent" in lowered and "python" in lowered:

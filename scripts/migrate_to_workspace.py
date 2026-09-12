@@ -15,7 +15,6 @@ from core.workspace import WorkspaceManager  # noqa: E402
 
 
 LEGACY_TO_WORKSPACE = {
-    "memory_store": "memory_dir",
     "document_store": "document_dir",
     "vector_store": "vector_dir",
 }

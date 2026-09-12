@@ -9,7 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from config.settings import settings
+from core.database import get_default_database_path
 from core.path_grounding import build_path_context
+from core.persistent_memory import PersistentMemory
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -23,8 +25,8 @@ class WorkspaceContext:
     user_id: str
     project_id: str
     root_dir: Path
+    database_path: Path
     workspace_dir: Path
-    memory_dir: Path
     document_dir: Path
     vector_dir: Path
     trace_dir: Path
@@ -38,9 +40,18 @@ class WorkspaceContext:
 class WorkspaceManager:
     """Create, inspect, and safely remove isolated workspaces."""
 
-    def __init__(self, root_dir: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        root_dir: Path | str | None = None,
+        database_path: Path | str | None = None,
+    ) -> None:
         configured_root = root_dir if root_dir is not None else _configured_workspace_root()
         self.root_dir = _resolve_workspace_root(configured_root)
+        self.database_path = (
+            Path(database_path).expanduser().resolve()
+            if database_path is not None
+            else get_default_database_path()
+        )
 
     def get_context(self, user_id: str | None = None, project_id: str | None = None) -> WorkspaceContext:
         """Return a sanitized workspace context."""
@@ -50,8 +61,8 @@ class WorkspaceManager:
                 user_id=self.sanitize_id(user_id, settings.default_user_id),
                 project_id=self.sanitize_id(project_id, settings.default_project_id),
                 root_dir=PROJECT_ROOT,
+                database_path=self.database_path,
                 workspace_dir=PROJECT_ROOT,
-                memory_dir=PROJECT_ROOT / "memory_store",
                 document_dir=PROJECT_ROOT / "document_store",
                 vector_dir=PROJECT_ROOT / "vector_store",
                 trace_dir=PROJECT_ROOT / "logs",
@@ -65,8 +76,8 @@ class WorkspaceManager:
             user_id=safe_user,
             project_id=safe_project,
             root_dir=self.root_dir,
+            database_path=self.database_path,
             workspace_dir=workspace_dir,
-            memory_dir=workspace_dir / "memory_store",
             document_dir=workspace_dir / "document_store",
             vector_dir=workspace_dir / "vector_store",
             trace_dir=workspace_dir / "traces",
@@ -81,7 +92,6 @@ class WorkspaceManager:
         for path in (
             context.root_dir,
             context.workspace_dir,
-            context.memory_dir,
             context.document_dir,
             context.vector_dir,
             context.trace_dir,
@@ -130,7 +140,7 @@ class WorkspaceManager:
         return results
 
     def delete_project_workspace(self, user_id: str, project_id: str) -> dict[str, object]:
-        """Delete one sanitized project workspace, never the workspace root."""
+        """Delete project-scoped memory first, then its filesystem workspace."""
 
         safe_user = self.sanitize_id(user_id, settings.default_user_id)
         safe_project = self.sanitize_id(project_id, settings.default_project_id)
@@ -138,10 +148,40 @@ class WorkspaceManager:
         root = self.root_dir.resolve()
         if target == root or root not in target.parents:
             raise ValueError("refusing to delete outside workspace root")
-        if not target.exists():
-            return {"success": True, "deleted": False, "workspace_id": f"{safe_user}/{safe_project}"}
-        shutil.rmtree(target)
-        return {"success": True, "deleted": True, "workspace_id": f"{safe_user}/{safe_project}"}
+        memory_cleanup = PersistentMemory.delete_project_scope(
+            database_path=self.database_path,
+            user_id=safe_user,
+            project_id=safe_project,
+        )
+        if not memory_cleanup.get("success"):
+            return {
+                "success": False,
+                "deleted": False,
+                "memory_deleted": False,
+                "workspace_id": f"{safe_user}/{safe_project}",
+                "error": memory_cleanup.get("error", "Project memory cleanup failed."),
+                "data": memory_cleanup.get("data", {}),
+            }
+        existed = target.exists()
+        try:
+            if existed:
+                shutil.rmtree(target)
+        except OSError as exc:
+            return {
+                "success": False,
+                "deleted": False,
+                "memory_deleted": True,
+                "workspace_id": f"{safe_user}/{safe_project}",
+                "error": f"Project filesystem deletion failed: {type(exc).__name__}",
+                "data": memory_cleanup.get("data", {}),
+            }
+        return {
+            "success": True,
+            "deleted": existed,
+            "memory_deleted": True,
+            "workspace_id": f"{safe_user}/{safe_project}",
+            "data": memory_cleanup.get("data", {}),
+        }
 
 
 def _resolve_project_path(path: Path | str) -> Path:

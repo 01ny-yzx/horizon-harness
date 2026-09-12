@@ -45,9 +45,20 @@ class MemoryListRequest(WorkspaceRequest):
     memory_type: str = "all"
 
 
-class ForgetMemoryRequest(WorkspaceRequest):
-    memory_type: str = "all"
-    keyword: str
+class DeleteMemoryReferenceRequest(WorkspaceRequest):
+    reference_id: str = Field(min_length=1)
+
+
+class DeleteUserPreferenceRequest(WorkspaceRequest):
+    key: str = Field(min_length=1)
+
+
+class DeleteProjectInstructionRequest(WorkspaceRequest):
+    content: str = Field(min_length=1)
+
+
+class ClearMemoryTypeRequest(WorkspaceRequest):
+    memory_type: str = Field(min_length=1)
 
 
 class RememberPreferenceRequest(WorkspaceRequest):
