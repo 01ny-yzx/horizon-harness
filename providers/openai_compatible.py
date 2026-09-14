@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 from core.unicode_safety import sanitize_unicode
@@ -34,6 +35,107 @@ class LLMProviderError(RuntimeError):
         self.retryable = retryable
         self.status_code = status_code
         self.response_headers = dict(response_headers or {})
+
+
+_CONTEXT_OVERFLOW_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"prompt is too long",
+        r"request_too_large",
+        r"input is too long for requested model",
+        r"exceeds the context window",
+        r"exceeds (?:the )?(?:model'?s )?maximum context length(?: of [\d,]+ tokens?|\s*\([\d,]+\))",
+        r"input token count.*exceeds the maximum",
+        r"tokens in request more than max tokens allowed",
+        r"maximum prompt length is \d+",
+        r"reduce the length of the messages",
+        r"maximum context length is \d+ tokens",
+        r"exceeds (?:the )?maximum allowed input length of [\d,]+ tokens?",
+        r"input \(\d+ tokens\) is longer than the model'?s context length \(\d+ tokens\)",
+        r"exceeds the limit of \d+",
+        r"exceeds the available context size",
+        r"greater than the context length",
+        r"context window exceeds limit",
+        r"exceeded model token limit",
+        r"context[_ ]length[_ ]exceeded",
+        r"request entity too large",
+        r"context length is only \d+ tokens",
+        r"input length.*exceeds.*context length",
+        r"prompt too long; exceeded (?:max )?context length",
+        r"too large for model with \d+ maximum context length",
+        r"prompt has [\d,]+ tokens?, but the configured context size is [\d,]+ tokens?",
+        r"model_context_window_exceeded",
+        r"too many tokens",
+        r"token limit exceeded",
+    )
+)
+_CONTEXT_OVERFLOW_EXCLUSIONS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"^(throttling error|service unavailable):",
+        r"rate limit",
+        r"too many requests",
+    )
+)
+_CONTEXT_OVERFLOW_EMPTY_BODY = re.compile(
+    r"^4(00|13)\s*(status code)?\s*\(no body\)", re.IGNORECASE
+)
+
+
+def is_context_overflow_message(message: str) -> bool:
+    """Mirror OpenCode's controlled provider message classification."""
+
+    text = str(message or "").strip()
+    return not any(pattern.search(text) for pattern in _CONTEXT_OVERFLOW_EXCLUSIONS) and (
+        any(pattern.search(text) for pattern in _CONTEXT_OVERFLOW_PATTERNS)
+        or bool(_CONTEXT_OVERFLOW_EMPTY_BODY.search(text))
+    )
+
+
+def is_context_overflow_failure(value: Any) -> bool:
+    """Prefer explicit provider classification/code, then controlled text patterns."""
+
+    if isinstance(value, LLMProviderError):
+        return str(value.code or "").strip().lower() == "context_overflow"
+    structured: list[str] = []
+    for source in (
+        value,
+        value if isinstance(value, dict) else None,
+        getattr(value, "body", None),
+        getattr(value, "error", None),
+    ):
+        if isinstance(source, dict):
+            structured.extend(
+                str(source[name])
+                for name in ("classification", "code", "error_code", "type")
+                if source.get(name)
+            )
+        elif source is not None:
+            structured.extend(
+                str(item)
+                for name in ("classification", "code", "error_code", "type")
+                if (item := getattr(source, name, None))
+            )
+    normalized = {item.strip().lower().replace("_", "-") for item in structured}
+    if normalized & {"rate-limit", "rate-limited", "too-many-requests"}:
+        return False
+    if normalized & {
+        "context-overflow",
+        "context-length-exceeded",
+        "model-context-window-exceeded",
+        "request-too-large",
+    }:
+        return True
+    messages = [str(value or "")]
+    if isinstance(value, dict):
+        messages.extend(str(value[name]) for name in ("message", "body") if value.get(name))
+    else:
+        messages.extend(
+            str(item)
+            for name in ("message", "safe_error", "failure_reason")
+            if (item := getattr(value, name, None))
+        )
+    return is_context_overflow_message(" ".join(messages))
 
 
 def _exception_status_code(exc: BaseException) -> int | None:
@@ -88,6 +190,19 @@ def _provider_error_from_exception(
     status_code = _exception_status_code(exc)
     headers = _exception_headers(exc)
     sdk_retryable = _exception_retryable(exc)
+    if (
+        error_name != "RateLimitError"
+        and status_code != 429
+        and not bool(status_code and status_code >= 500)
+        and (is_context_overflow_failure(exc) or is_context_overflow_message(safe_error))
+    ):
+        return LLMProviderError(
+            f"LLM request exceeded the model context window. {safe_error}",
+            code="context_overflow",
+            retryable=False,
+            status_code=status_code,
+            response_headers=headers,
+        )
     if error_name == "AuthenticationError" or status_code in {401, 403}:
         return LLMProviderError(
             "LLM authentication failed. Check LLM_API_KEY for the configured provider.",
@@ -150,6 +265,8 @@ def _provider_error_from_exception(
         status_code=status_code,
         response_headers=headers,
     )
+
+
 
 
 def _usage_value(source: Any, name: str) -> Any:
