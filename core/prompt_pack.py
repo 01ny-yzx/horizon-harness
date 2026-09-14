@@ -42,6 +42,7 @@ def build_initial_agent_turn_pack(
     user_input: str,
     tools: list[dict[str, Any]],
     memory_messages: list[dict[str, Any]] | None = None,
+    system_context_messages: list[dict[str, Any]] | None = None,
     request_guidance_messages: list[dict[str, Any]] | None = None,
     reference_guidance_messages: list[dict[str, Any]] | None = None,
     runtime_model_identity_note: str = "",
@@ -72,6 +73,7 @@ def build_initial_agent_turn_pack(
     messages = build_agent_turn_messages(
         system_instruction=system,
         memory_messages=memory_messages or [],
+        system_context_messages=system_context_messages or [],
         request_guidance_messages=request_guidance_messages or [],
         reference_guidance_messages=reference_guidance_messages or [],
         current_user_input=user_input,
@@ -101,6 +103,7 @@ def build_tool_call_pack(
     task_state: Any,
     tools: list[dict[str, Any]],
     memory_messages: list[dict[str, Any]],
+    system_context_messages: list[dict[str, Any]] | None = None,
     request_guidance_messages: list[dict[str, Any]] | None = None,
     reference_guidance_messages: list[dict[str, Any]] | None = None,
     runtime_model_identity_note: str = "",
@@ -115,6 +118,7 @@ def build_tool_call_pack(
         task_state=task_state,
         tools=tools,
         memory_messages=memory_messages,
+        system_context_messages=system_context_messages,
         request_guidance_messages=request_guidance_messages,
         reference_guidance_messages=reference_guidance_messages,
         runtime_model_identity_note=runtime_model_identity_note,
@@ -130,6 +134,7 @@ def build_agent_continuation_pack(
     task_state: Any,
     tools: list[dict[str, Any]],
     memory_messages: list[dict[str, Any]],
+    system_context_messages: list[dict[str, Any]] | None = None,
     request_guidance_messages: list[dict[str, Any]] | None = None,
     reference_guidance_messages: list[dict[str, Any]] | None = None,
     runtime_model_identity_note: str = "",
@@ -154,6 +159,7 @@ def build_agent_continuation_pack(
     messages = build_agent_turn_messages(
         system_instruction=system,
         memory_messages=memory_messages,
+        system_context_messages=system_context_messages or [],
         request_guidance_messages=request_guidance_messages or [],
         reference_guidance_messages=reference_guidance_messages or [],
         current_user_input=user_input,
@@ -187,6 +193,7 @@ def build_agent_turn_messages(
     *,
     system_instruction: str,
     memory_messages: list[dict[str, Any]],
+    system_context_messages: list[dict[str, Any]] | None = None,
     request_guidance_messages: list[dict[str, Any]] | None = None,
     reference_guidance_messages: list[dict[str, Any]] | None = None,
     current_user_input: str,
@@ -199,6 +206,11 @@ def build_agent_turn_messages(
     messages: list[dict[str, Any]] = [{"role": "system", "content": str(system_instruction or "").strip()}]
     if runtime_model_identity_note:
         messages.append({"role": "system", "content": str(runtime_model_identity_note)})
+    messages.extend(
+        dict(message)
+        for message in system_context_messages or []
+        if isinstance(message, dict)
+    )
     messages.extend(
         dict(message)
         for message in request_guidance_messages or []

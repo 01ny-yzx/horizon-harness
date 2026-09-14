@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import traceback
-
 from config.settings import settings
-from core.agent_factory import build_agent_for_workspace
-from providers.openai_compatible import LLMProviderError
+from core.agent_factory import create_session_for_workspace
+from core.session import SessionService
 
 
 def main() -> None:
@@ -16,7 +14,9 @@ def main() -> None:
     print(f"Current LLM: {settings.llm_provider} / {settings.llm_model}")
     print("Example: help me inspect files in the current directory")
 
-    agent = build_agent_for_workspace()
+    workspace, session = create_session_for_workspace()
+    sessions = SessionService(database_path=workspace.database_path)
+    print(f"Session ID: {session.id}")
 
     while True:
         try:
@@ -33,16 +33,15 @@ def main() -> None:
             break
 
         try:
-            final_answer = agent.run(user_input)
-        except LLMProviderError as exc:
-            if settings.debug_mode:
-                traceback.print_exc()
-            final_answer = (
-                "模型服务调用失败，请检查模型服务、API Key、网络或模型配置。"
-                f"\n简要原因：{exc}"
-            )
-        print("\nFinal Answer:")
-        print(final_answer)
+            admitted = sessions.prompt(session.id, user_input)
+        except Exception as exc:  # noqa: BLE001
+            print(f"\nPrompt admission failed: {exc}")
+            continue
+        print("\nPrompt admitted:")
+        print(
+            f"session_id={admitted.session_id} message_id={admitted.id} "
+            f"admitted_seq={admitted.admitted_seq} delivery={admitted.delivery}"
+        )
 
 
 if __name__ == "__main__":

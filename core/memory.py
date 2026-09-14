@@ -49,6 +49,10 @@ class AgentTurnSessionContext:
     history_chars: int
     compacted: bool
     current_user_count: int
+    system_context_messages: tuple[dict[str, Any], ...] = ()
+    system_context_baseline_seq: int = -1
+    effective_instruction_paths: tuple[str, ...] = ()
+    system_context_source_keys: tuple[str, ...] = ()
 
     def trace_summary(self) -> dict[str, Any]:
         return sanitize_unicode(
@@ -57,6 +61,7 @@ class AgentTurnSessionContext:
                 "agent_turn_history_chars": self.history_chars,
                 "agent_turn_compacted": self.compacted,
                 "agent_turn_current_user_count": self.current_user_count,
+                "system_context_baseline_seq": self.system_context_baseline_seq,
             }
         )
 
@@ -303,6 +308,27 @@ class Memory:
             if message.get("role") == "system" and not message_task_id:
                 selected.append(message)
         return sanitize_unicode([self._strip_internal_fields(message) for message in selected])
+
+    def get_runtime_overlay_messages(self, task_id: str = "") -> list[dict[str, Any]]:
+        """Return only process-local system context, never conversation roles."""
+
+        effective_task_id = str(task_id or self.current_task_id or "").strip()
+        selected: list[dict[str, Any]] = []
+        for message in self.messages:
+            if not isinstance(message, dict) or message.get("role") != "system":
+                continue
+            metadata = message.get("metadata")
+            metadata = metadata if isinstance(metadata, dict) else {}
+            message_task_id = str(metadata.get("task_id") or "").strip()
+            note_type = str(metadata.get("note_type") or "")
+            if message_task_id and message_task_id != effective_task_id:
+                continue
+            selected.append(
+                self._agent_turn_system_message(message, note_type=note_type)
+            )
+        return sanitize_unicode(
+            [self._strip_internal_fields(message) for message in selected]
+        )
 
     def get_agent_turn_context(
         self,

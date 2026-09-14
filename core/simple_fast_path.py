@@ -67,7 +67,10 @@ def build_simple_chat_messages(
     memory: Any,
     user_input: str,
     *,
+    history_messages: list[dict[str, Any]] | None = None,
+    current_user_included: bool = False,
     identity_note: str = "",
+    system_context_messages: list[dict[str, Any]] | None = None,
     request_guidance_messages: list[dict[str, Any]] | None = None,
     reference_guidance_messages: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
@@ -78,6 +81,11 @@ def build_simple_chat_messages(
         messages.append({"role": "system", "content": identity_note})
     messages.extend(
         dict(message)
+        for message in system_context_messages or []
+        if isinstance(message, dict)
+    )
+    messages.extend(
+        dict(message)
         for message in request_guidance_messages or []
         if isinstance(message, dict)
     )
@@ -86,11 +94,20 @@ def build_simple_chat_messages(
         for message in reference_guidance_messages or []
         if isinstance(message, dict)
     )
-    for message in getattr(memory, "messages", []) or []:
+    source_messages = (
+        history_messages
+        if history_messages is not None
+        else getattr(memory, "messages", []) or []
+    )
+    for message in source_messages:
+        if history_messages is not None:
+            messages.append(dict(message))
+            continue
         filtered = _simple_history_message(message)
         if filtered is not None:
             messages.append(filtered)
-    messages.append({"role": "user", "content": str(user_input or "")})
+    if not current_user_included:
+        messages.append({"role": "user", "content": str(user_input or "")})
     return sanitize_unicode(messages)
 
 

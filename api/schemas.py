@@ -16,14 +16,22 @@ class WorkspaceRequest(BaseModel):
 
 class ChatRequest(WorkspaceRequest):
     message: str
+    session_id: str | None = None
+    message_id: str | None = None
+    delivery: str = "steer"
+    resume: bool = True
     debug: bool = False
 
 
 class ChatResponse(BaseModel):
     success: bool
-    answer: str
+    answer: str | None = None
     user_id: str
     project_id: str
+    session_id: str | None = None
+    message_id: str | None = None
+    admitted_seq: int | None = None
+    delivery: str | None = None
     trace_id: str | None = None
     remaining: int | None = None
     rate_limit: dict[str, Any] | None = None

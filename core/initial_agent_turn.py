@@ -20,7 +20,7 @@ from core.tool_schema_scope import schema_tool_name
 from core.tool_spec import ToolKind
 from core.unicode_safety import sanitize_unicode
 from providers.base import call_llm_chat_result, extract_provider_metadata
-from providers.openai_compatible import LLMProviderError
+from providers.openai_compatible import LLMProviderError, is_context_overflow_failure
 from tools.registry import get_executable_tool_name
 
 
@@ -130,8 +130,13 @@ def execute_initial_agent_turn(
         )
         assistant_message = chat_result.message
     except LLMProviderError as exc:
+        error_code = (
+            "context_overflow"
+            if is_context_overflow_failure(exc)
+            else str(getattr(exc, "code", "provider_error") or "provider_error")
+        )
         result = _terminal_failure(
-            surface, "provider", "provider_exception", str(getattr(exc, "code", "provider_error") or "provider_error"),
+            surface, "provider", "provider_exception", error_code,
             bool(getattr(exc, "retryable", False)), "模型服务调用失败，任务未执行。",
             provider_metadata={
                 "response_headers": dict(

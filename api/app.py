@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.deps import require_api_key
-from api.routes import browser, cache, chat, cloud_mcp_gateway, documents, files, health, mcp, mcp_gateway, memory, rag, sandbox, usage, workspace
+from api.routes import browser, cache, chat, cloud_mcp_gateway, documents, files, health, mcp, mcp_gateway, memory, rag, sandbox, session, usage, workspace
 from config.settings import settings
 
 
@@ -36,6 +36,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     protected = [Depends(require_api_key)]
     app.include_router(chat.router, dependencies=protected)
+    app.include_router(session.router, dependencies=protected)
     app.include_router(workspace.router, dependencies=protected)
     app.include_router(memory.router, dependencies=protected)
     app.include_router(documents.router, dependencies=protected)

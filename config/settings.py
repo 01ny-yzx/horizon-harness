@@ -125,6 +125,9 @@ class Settings:
     context_budget_enabled: bool = True
     context_budget_auto_compact: bool = True
     context_budget_prune_tool_outputs: bool = True
+    session_compaction_auto: bool = True
+    session_compaction_buffer_tokens: int = 20_000
+    session_compaction_keep_tokens: int = 8_000
 
 
 def _get_bool_env(name: str, default: bool = False) -> bool:
@@ -368,6 +371,9 @@ settings = Settings(
     context_budget_enabled=_get_bool_env("CONTEXT_BUDGET_ENABLED", default=True),
     context_budget_auto_compact=_get_bool_env("CONTEXT_COMPACT_AUTO", default=True),
     context_budget_prune_tool_outputs=_get_bool_env("CONTEXT_PRUNE_TOOL_OUTPUTS", default=True),
+    session_compaction_auto=_get_bool_env("SESSION_COMPACTION_AUTO", default=True),
+    session_compaction_buffer_tokens=_get_int_env("SESSION_COMPACTION_BUFFER_TOKENS", 20_000),
+    session_compaction_keep_tokens=_get_int_env("SESSION_COMPACTION_KEEP_TOKENS", 8_000),
 )
 
 

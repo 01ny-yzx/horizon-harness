@@ -3,28 +3,29 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
 
 from core.workspace import WorkspaceContext, WorkspaceManager
 
 
-_CURRENT_WORKSPACE: WorkspaceContext | None = None
+_WORKSPACE_LOCAL = threading.local()
 
 
 def set_current_workspace(context: WorkspaceContext) -> None:
-    """Set the current process workspace used by tools."""
+    """Set the current execution-thread workspace used by tools."""
 
-    global _CURRENT_WORKSPACE
     WorkspaceManager().ensure_workspace(context)
-    _CURRENT_WORKSPACE = context
+    _WORKSPACE_LOCAL.current = context
 
 
 def get_current_workspace() -> WorkspaceContext:
-    """Return the current workspace, falling back to default workspace."""
+    """Return this execution thread's workspace, or its default workspace."""
 
-    global _CURRENT_WORKSPACE
-    if _CURRENT_WORKSPACE is None:
-        _CURRENT_WORKSPACE = WorkspaceManager().get_context()
-    return _CURRENT_WORKSPACE
+    current = getattr(_WORKSPACE_LOCAL, "current", None)
+    if current is None:
+        current = WorkspaceManager().get_context()
+        _WORKSPACE_LOCAL.current = current
+    return current
 
 
 def get_database_path() -> Path:

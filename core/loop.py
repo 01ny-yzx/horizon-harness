@@ -6,6 +6,7 @@ import inspect
 import json
 import os
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from collections.abc import Callable
@@ -88,15 +89,20 @@ from core.instruction_context import (
 from core.guard_fast_path import record_guard_fast_path
 from core.document_store import DocumentStore
 from core.context_fusion import ContextFusionEngine
-from core.context_budget import apply_context_budget, context_budget_config_from_settings
+from core.context_budget import (
+    ContextBudgetDecision,
+    apply_context_budget,
+    context_budget_config_from_settings,
+    estimate_request_tokens,
+)
 from core.llm_call_profile import resolve_llm_call_options
-from core.memory import Memory
+from core.memory import AgentTurnSessionContext, Memory
 from core.memory_mutation_policy import (
     MEMORY_MUTATION_TOOLS,
     MEMORY_TOOLS,
     memory_mutation_context,
 )
-from core.memory_reference_guidance import resolve_memory_reference_guidance
+from core.memory_reference_guidance import MemoryReferenceGuidance, resolve_memory_reference_guidance
 from core.message_validator import validate_openai_tool_messages
 from core.mcp_registry import MCPRegistry
 from core.mcp_runtime import MCPRuntimeStatus, build_mcp_runtime
@@ -109,6 +115,8 @@ from core.prompt_pack import (
     build_tool_call_pack,
 )
 from core.request_guidance import (
+    RequestGuidance,
+    RequestGuidanceTransition,
     request_guidance_trace_payload,
     resolve_request_guidance,
     resolve_request_guidance_transition,
@@ -118,6 +126,32 @@ from core.browser_policy import BrowserPolicy
 from core.sandbox import current_sandbox_manager
 from core.runtime_lane import RuntimeLaneDecision, resolve_runtime_lane
 from core.runtime_metrics import RuntimeMetrics, elapsed_ms
+from core.session import SessionInfo, SessionWorkspaceMismatchError
+from core.session_event import SessionEventPublisher
+from core.session_context_epoch import SessionContextEpoch
+from core.session_compaction import SessionCompaction, is_context_overflow_failure
+from core.session_history import SessionHistory
+from core.horizon_system_context import (
+    build_horizon_system_context_registry,
+    effective_instruction_paths,
+)
+from core.session_message import create_session_message_id, create_text_id
+from core.session_input import SessionInputService
+from core.session_runtime_projection import project_session_history
+from core.session_message_updater import (
+    SYNTHETIC,
+    STEP_ENDED,
+    STEP_FAILED,
+    STEP_STARTED,
+    TEXT_ENDED,
+    TEXT_STARTED,
+    TOOL_CALLED,
+    TOOL_FAILED,
+    TOOL_INPUT_ENDED,
+    TOOL_INPUT_STARTED,
+    TOOL_SUCCESS,
+)
+from core.session_store import SessionStore
 from core.provider_retry_delay import compute_provider_retry_delay
 from core.exact_tool_call_loop_guard import (
     ExactToolCallLoopState,
@@ -1230,6 +1264,53 @@ def _dispatch_arguments(tool: Callable[..., Any], arguments: dict[str, Any]) -> 
     return {key: value for key, value in arguments.items() if key not in hidden or key in declared}
 
 
+def _session_tool_call_fields(tool_call: Any) -> tuple[str, str, str]:
+    """Return stable structured ToolCall identity without provider objects."""
+
+    call_id = str(
+        tool_call.get("id") if isinstance(tool_call, dict) else getattr(tool_call, "id", "")
+        or ""
+    )
+    function = (
+        tool_call.get("function")
+        if isinstance(tool_call, dict)
+        else getattr(tool_call, "function", None)
+    )
+    if isinstance(function, dict):
+        name = str(function.get("name") or "")
+        arguments = str(function.get("arguments") or "")
+    else:
+        name = str(getattr(function, "name", "") or "")
+        arguments = str(getattr(function, "arguments", "") or "")
+    return call_id, name, arguments
+
+
+def _session_epoch_guidance(
+    context: AgentTurnSessionContext,
+) -> tuple[RequestGuidance, RequestGuidanceTransition, MemoryReferenceGuidance]:
+    """Expose content-free compatibility metadata; the epoch owns Session guidance."""
+
+    paths = tuple(context.effective_instruction_paths)
+    source_keys = set(context.system_context_source_keys)
+    guidance = RequestGuidance(
+        system_messages=(),
+        instruction_paths=paths,
+        unavailable_instruction_paths=(),
+        root_instruction_included=bool(paths),
+        root_instruction_fingerprint="",
+        root_instruction_chars=0,
+        persistent_guidance_included="horizon/persistent-instructions" in source_keys,
+        persistent_guidance_fingerprint="",
+        persistent_guidance_chars=0,
+        persistent_load_success=True,
+        effective_guidance_fingerprint="",
+    )
+    transition = RequestGuidanceTransition((), False, False)
+    reference_available = "horizon/memory-reference-guidance" in source_keys
+    references = MemoryReferenceGuidance((), reference_available, (), {}, True)
+    return guidance, transition, references
+
+
 class AgentLoop:
     """Runs one command-line Agent session."""
 
@@ -1243,20 +1324,81 @@ class AgentLoop:
         project_id: str | None = None,
         mcp_registry: MCPRegistry | None = None,
         mcp_runtime_status: MCPRuntimeStatus | None = None,
+        session_id: str | None = None,
     ) -> None:
         self.llm = llm
         self.memory = memory
         self.max_steps = max_steps
         self.max_consecutive_failures = max_consecutive_failures
+        self.session_id = str(session_id or "")
         self.debug_mode = settings.debug_mode
         self.workspace_manager = WorkspaceManager()
-        self.workspace = self.workspace_manager.get_context(user_id, project_id)
+        self._session_info: SessionInfo | None = None
+        self.session_store: SessionStore | None = None
+        self.session_events: SessionEventPublisher | None = None
+        self.session_inputs: SessionInputService | None = None
+        self.session_context_epoch: SessionContextEpoch | None = None
+        self.session_compaction: SessionCompaction | None = None
+        self.system_context_registry: Any | None = None
+        self._session_turn_promotion: str | None = None
+        self._session_cancelled: threading.Event | None = None
+        self._session_projected_tool_calls: set[tuple[str, str]] = set()
+        self._session_last_provider_text = ""
+        if self.session_id:
+            session_store = SessionStore(
+                database_path=self.workspace_manager.database_path
+            )
+            session = session_store.get(self.session_id)
+            requested_user = self.workspace_manager.sanitize_id(user_id, session.user_id)
+            requested_project = self.workspace_manager.sanitize_id(
+                project_id,
+                session.project_id,
+            )
+            requested_workspace = f"{requested_user}/{requested_project}"
+            if (
+                requested_user != session.user_id
+                or requested_project != session.project_id
+                or requested_workspace != session.workspace_id
+            ):
+                raise SessionWorkspaceMismatchError(
+                    "Session-bound Agent workspace does not match the durable Session identity."
+                )
+            self._session_info = session
+            self.session_store = session_store
+            self.session_events = SessionEventPublisher(database=session_store.database)
+            self.session_inputs = SessionInputService(database=session_store.database)
+            self.workspace = self.workspace_manager.get_context(
+                session.user_id,
+                session.project_id,
+            )
+            if self.workspace.workspace_id != session.workspace_id:
+                raise SessionWorkspaceMismatchError(
+                    "Resolved runtime workspace does not match the durable Session identity."
+                )
+        else:
+            self.workspace = self.workspace_manager.get_context(user_id, project_id)
         set_current_workspace(self.workspace)
         self.persistent_memory = PersistentMemory(
             database_path=self.workspace.database_path,
             user_id=self.workspace.user_id,
             project_id=self.workspace.project_id,
         )
+        if self._session_info is not None and self.session_store is not None:
+            self.session_context_epoch = SessionContextEpoch(
+                database=self.session_store.database,
+                events=self.session_events,
+            )
+            self.session_compaction = SessionCompaction(
+                self.llm,
+                self.session_events,
+                auto=bool(settings.session_compaction_auto),
+                buffer_tokens=settings.session_compaction_buffer_tokens,
+                keep_tokens=settings.session_compaction_keep_tokens,
+            )
+            self.system_context_registry = build_horizon_system_context_registry(
+                self._session_info,
+                self.persistent_memory,
+            )
         self.document_store = DocumentStore(document_dir=self.workspace.document_dir)
         self.rag_engine = RAGEngine(self.document_store)
         self.context_fusion = ContextFusionEngine()
@@ -1276,15 +1418,489 @@ class AgentLoop:
         self.last_trace_latest_path = ""
         self.last_trace_save_error = ""
         self._last_request_guidance_fingerprint = ""
+    def _publish_session_event(self, event_type: str, **data: Any) -> None:
+        """Publish one event only when this Agent owns a durable Session."""
+
+        session_events = getattr(self, "session_events", None)
+        session_info = getattr(self, "_session_info", None)
+        if session_events is None or session_info is None:
+            return
+        session_events.publish(
+            aggregate_id=session_info.id,
+            event_type=event_type,
+            data={"session_id": session_info.id, **data},
+        )
+
+    def _start_session_assistant_step(self) -> str:
+        if getattr(self, "session_events", None) is None:
+            return ""
+        message_id = create_session_message_id()
+        self._publish_session_event(
+            STEP_STARTED,
+            assistant_message_id=message_id,
+            provider=settings.llm_provider,
+            model=settings.llm_model,
+        )
+        return message_id
+
+    def _record_session_assistant_output(
+        self,
+        assistant_message_id: str,
+        assistant_message: Any,
+    ) -> None:
+        """Project complete provider text and structured ToolCall boundaries."""
+
+        if not assistant_message_id or getattr(self, "session_events", None) is None:
+            return
+        content = str(getattr(assistant_message, "content", "") or "")
+        if isinstance(assistant_message, dict):
+            content = str(assistant_message.get("content") or "")
+        if content:
+            self._session_last_provider_text = content
+            text_id = create_text_id()
+            self._publish_session_event(
+                TEXT_STARTED,
+                assistant_message_id=assistant_message_id,
+                text_id=text_id,
+            )
+            self._publish_session_event(
+                TEXT_ENDED,
+                assistant_message_id=assistant_message_id,
+                text_id=text_id,
+                text=content,
+            )
+        tool_calls = (
+            assistant_message.get("tool_calls")
+            if isinstance(assistant_message, dict)
+            else getattr(assistant_message, "tool_calls", None)
+        ) or []
+        for tool_call in tool_calls:
+            call_id, name, raw_arguments = _session_tool_call_fields(tool_call)
+            if not call_id or not name:
+                continue
+            self._publish_session_event(
+                TOOL_INPUT_STARTED,
+                assistant_message_id=assistant_message_id,
+                call_id=call_id,
+                name=name,
+            )
+            self._publish_session_event(
+                TOOL_INPUT_ENDED,
+                assistant_message_id=assistant_message_id,
+                call_id=call_id,
+                text=raw_arguments,
+            )
+            self._session_projected_tool_calls.add((assistant_message_id, call_id))
+
+    def _end_session_assistant_step(
+        self,
+        assistant_message_id: str,
+        *,
+        finish: str = "stop",
+        provider_metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if not assistant_message_id:
+            return
+        self._publish_session_event(
+            STEP_ENDED,
+            assistant_message_id=assistant_message_id,
+            finish=finish or "stop",
+            provider_metadata=dict(provider_metadata or {}),
+        )
+
+    def _fail_session_assistant_step(
+        self,
+        assistant_message_id: str,
+        *,
+        error: str,
+        error_code: str,
+    ) -> None:
+        if not assistant_message_id:
+            return
+        self._publish_session_event(
+            STEP_FAILED,
+            assistant_message_id=assistant_message_id,
+            error=error,
+            error_code=error_code,
+        )
+
+    def _mark_session_tool_called(
+        self,
+        envelope: ToolCallEnvelope,
+        arguments: dict[str, Any],
+    ) -> None:
+        assistant_message_id = str(
+            envelope.metadata.get("session_assistant_message_id") or ""
+        )
+        call_id = str(envelope.provider_call_id or envelope.call_id or "")
+        if (
+            not assistant_message_id
+            or (assistant_message_id, call_id)
+            not in self._session_projected_tool_calls
+            or envelope.metadata.get("session_tool_called")
+        ):
+            return
+        self._publish_session_event(
+            TOOL_CALLED,
+            assistant_message_id=assistant_message_id,
+            call_id=call_id,
+            name=str(envelope.executable_name or envelope.tool_name or ""),
+            input=dict(arguments),
+        )
+        envelope.metadata["session_tool_called"] = True
+
+    def _settle_session_tool(
+        self,
+        assistant_message_id: str,
+        call_id: str,
+        observation: ToolObservation,
+    ) -> None:
+        if (
+            not assistant_message_id
+            or not call_id
+            or (assistant_message_id, call_id)
+            not in self._session_projected_tool_calls
+        ):
+            return
+        self._publish_session_event(
+            TOOL_SUCCESS if observation.success else TOOL_FAILED,
+            assistant_message_id=assistant_message_id,
+            call_id=call_id,
+            observation=observation_to_cache_snapshot(observation),
+        )
+        self._session_projected_tool_calls.discard((assistant_message_id, call_id))
+
+    def _assert_session_workspace_request(
+        self,
+        *,
+        user_id: str | None,
+        project_id: str | None,
+    ) -> None:
+        """Reject a workspace identity that differs from the durable Session."""
+
+        session = self._session_info
+        if session is None:
+            return
+        if (
+            self.workspace.user_id != session.user_id
+            or self.workspace.project_id != session.project_id
+            or self.workspace.workspace_id != session.workspace_id
+        ):
+            raise SessionWorkspaceMismatchError(
+                "Agent runtime workspace no longer matches the durable Session identity."
+            )
+        requested_user = self.workspace_manager.sanitize_id(user_id, session.user_id)
+        requested_project = self.workspace_manager.sanitize_id(
+            project_id,
+            session.project_id,
+        )
+        requested_workspace = f"{requested_user}/{requested_project}"
+        if (
+            requested_user != session.user_id
+            or requested_project != session.project_id
+            or requested_workspace != session.workspace_id
+        ):
+            raise SessionWorkspaceMismatchError(
+                "Session-bound Agent cannot use a different workspace without "
+                "an explicit durable Session move."
+            )
+
+    def _session_workspace_tool_block(
+        self,
+        envelope: ToolCallEnvelope,
+        arguments: dict[str, Any],
+    ) -> ToolObservation | None:
+        """Block cross-workspace switching before the tool mutates runtime state."""
+
+        session = self._session_info
+        if session is None:
+            return None
+        requested_user = self.workspace_manager.sanitize_id(
+            str(arguments.get("user_id") or ""),
+            session.user_id,
+        )
+        requested_project = self.workspace_manager.sanitize_id(
+            str(arguments.get("project_id") or ""),
+            session.project_id,
+        )
+        requested_workspace = f"{requested_user}/{requested_project}"
+        if (
+            requested_user == session.user_id
+            and requested_project == session.project_id
+            and requested_workspace == session.workspace_id
+        ):
+            return None
+        return make_blocked_observation(
+            envelope,
+            reason="session_workspace_mismatch",
+            error=(
+                "Session-bound Agent cannot switch to a different workspace "
+                "without an explicit durable Session move."
+            ),
+            data={
+                "code": "session_workspace_mismatch",
+                "session_id": session.id,
+                "expected_workspace_id": session.workspace_id,
+                "requested_workspace_id": requested_workspace,
+                "real_execution": False,
+                "tool_executed": False,
+                "stopped_before_execution": True,
+            },
+        )
 
     def run(self, user_input: str, user_id: str | None = None, project_id: str | None = None) -> str:
-        """Handle one user task and return a clean final answer."""
+        """Run only the legacy non-Session synchronous Agent path."""
 
+        if self._session_info is None:
+            return self._run_request(user_input, user_id=user_id, project_id=project_id)
+        self._assert_session_workspace_request(user_id=user_id, project_id=project_id)
+        raise RuntimeError(
+            "Session-bound prompts must use SessionService.prompt(), not AgentLoop.run()"
+        )
+
+    def _run_session_work_item(
+        self,
+        user_input: str,
+        promotion: str | None,
+        cancelled: threading.Event,
+    ) -> None:
+        self._session_turn_promotion = promotion
+        self._session_cancelled = cancelled
+        try:
+            self._run_request(
+                user_input,
+                user_id=self.workspace.user_id,
+                project_id=self.workspace.project_id,
+            )
+        finally:
+            self._session_turn_promotion = None
+            self._session_cancelled = None
+
+    def _check_session_interrupted(self) -> None:
+        if self._session_cancelled is not None and self._session_cancelled.is_set():
+            raise InterruptedError("Session execution interrupted at a cooperative boundary")
+
+    def _prepare_provider_session_context(
+        self,
+        task_id: str,
+        user_input: str,
+        *,
+        promote: bool = True,
+    ) -> AgentTurnSessionContext:
+        """Promote, reload, and project durable history for one Provider turn."""
+
+        if (
+            self._session_info is None
+            or self.session_inputs is None
+            or self.session_events is None
+            or self.session_store is None
+            or self.session_context_epoch is None
+            or self.system_context_registry is None
+        ):
+            return self.memory.get_agent_turn_context(
+                task_id,
+                user_input,
+                include_previous_dialogue=True,
+            )
+        self._check_session_interrupted()
+        initialized = None
+        if promote:
+            initialized = self.session_context_epoch.initialize(
+                self._session_info.id,
+                self.system_context_registry.load,
+            )
+            cutoff = self.session_events.latest_sequence(self._session_info.id)
+            if self._session_turn_promotion == "queue":
+                self.session_inputs.promote_next_queued(self._session_info.id)
+            self.session_inputs.promote_steers(
+                self._session_info.id,
+                cutoff,
+            )
+            self._session_turn_promotion = "steer"
+        epoch = initialized or self.session_context_epoch.prepare(
+            self._session_info.id,
+            self.system_context_registry.load,
+        )
+        durable = project_session_history(
+            SessionHistory(database=self.session_store.database).load_for_runner(
+                self._session_info.id,
+                epoch.baseline_seq,
+            )
+        )
+        overlay = self.memory.get_runtime_overlay_messages(task_id)
+        projected = [*overlay, *durable]
+        current_user_count = sum(
+            1
+            for message in durable
+            if message.get("role") == "user"
+            and str(message.get("content") or "") == str(user_input or "")
+        )
+        history = [
+            message
+            for message in durable
+            if not (
+                message.get("role") == "user"
+                and str(message.get("content") or "") == str(user_input or "")
+            )
+        ]
+        return AgentTurnSessionContext(
+            messages=projected,
+            history_message_count=len(history),
+            history_chars=sum(len(str(item.get("content") or "")) for item in history),
+            compacted=False,
+            current_user_count=current_user_count,
+            system_context_messages=(
+                (
+                    {
+                        "role": "system",
+                        "content": epoch.baseline,
+                        "metadata": {
+                            "note_type": "session_system_context_baseline",
+                        },
+                    },
+                )
+                if epoch.baseline
+                else ()
+            ),
+            system_context_baseline_seq=epoch.baseline_seq,
+            effective_instruction_paths=effective_instruction_paths(
+                epoch.snapshot.to_dict()
+            ),
+            system_context_source_keys=tuple(sorted(epoch.snapshot.sources)),
+        )
+
+    def _compact_session_request_if_needed(
+        self,
+        session_context: AgentTurnSessionContext,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        options: Any,
+        *,
+        overflow: bool = False,
+    ) -> bool:
+        if (
+            self._session_info is None
+            or self.session_store is None
+            or self.session_compaction is None
+        ):
+            return False
+        entries = SessionHistory(database=self.session_store.database).entries_for_runner(
+            self._session_info.id,
+            session_context.system_context_baseline_seq,
+        )
+        common = {
+            "model_context_tokens": _model_context_tokens(self.llm),
+            "model_input_tokens": _model_input_tokens(self.llm),
+            "model_output_tokens": _model_output_tokens(self.llm),
+            "requested_output_tokens": _reserved_output_tokens(self.llm, options),
+        }
+        if overflow:
+            return self.session_compaction.compact_after_overflow(
+                self._session_info.id,
+                entries,
+                **common,
+            )
+        return self.session_compaction.compact_if_needed(
+            self._session_info.id,
+            entries,
+            request_messages=messages,
+            tools=tools,
+            **common,
+        )
+
+    def _stabilize_session_provider_request(
+        self,
+        session_context: AgentTurnSessionContext,
+        messages: list[dict[str, Any]],
+        artifact: Any,
+        *,
+        task_id: str,
+        user_input: str,
+        tools: list[dict[str, Any]],
+        options: Any,
+        rebuild: Callable[[AgentTurnSessionContext], tuple[list[dict[str, Any]], Any]],
+    ) -> tuple[AgentTurnSessionContext, list[dict[str, Any]], Any, int]:
+        """Repeat durable compaction and rebuild until no further progress is possible."""
+
+        compacted = 0
+        while True:
+            before = (
+                SessionHistory(database=self.session_store.database).latest_compaction(
+                    self._session_info.id
+                )
+                if self._session_info is not None and self.session_store is not None
+                else None
+            )
+            if not self._compact_session_request_if_needed(
+                session_context,
+                messages,
+                tools,
+                options,
+            ):
+                break
+            after = SessionHistory(
+                database=self.session_store.database
+            ).latest_compaction(self._session_info.id)
+            if after is None or (before is not None and after.seq <= before.seq):
+                break
+            compacted += 1
+            session_context = self._prepare_provider_session_context(
+                task_id,
+                user_input,
+                promote=False,
+            )
+            messages, artifact = rebuild(session_context)
+        return session_context, messages, artifact, compacted
+
+    @staticmethod
+    def _session_budget_decision(
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        *,
+        runtime_lane: str,
+        compacted: bool,
+    ) -> ContextBudgetDecision:
+        message_chars = sum(len(str(item.get("content") or "")) for item in messages)
+        tool_chars = len(json.dumps(tools, ensure_ascii=False, default=str))
+        estimated = estimate_request_tokens(messages, tools)
+        return ContextBudgetDecision(
+            enabled=True,
+            action="compact" if compacted else "keep",
+            reason=(
+                "durable_session_compaction"
+                if compacted
+                else "durable_session_history_within_budget"
+            ),
+            runtime_lane=runtime_lane,
+            original_chars=message_chars + tool_chars,
+            final_chars=message_chars + tool_chars,
+            saved_chars=0,
+            original_message_count=len(messages),
+            final_message_count=len(messages),
+            tool_schema_chars=tool_chars,
+            compacted_message_count=0,
+            pruned_tool_message_count=0,
+            original_estimated_tokens=estimated,
+            final_estimated_tokens=estimated,
+            pressure_detected=compacted,
+        )
+
+    def _run_request(
+        self,
+        user_input: str,
+        user_id: str | None = None,
+        project_id: str | None = None,
+    ) -> str:
+        """Execute one Agent work item; Session admission is owned by run()."""
+
+        if self._session_info is not None:
+            self._assert_session_workspace_request(user_id=user_id, project_id=project_id)
+        self._session_last_provider_text = ""
         self.last_trace_id = ""
         self.last_trace_path = ""
         self.last_trace_latest_path = ""
         self.last_trace_save_error = ""
-        if user_id is not None or project_id is not None:
+        if self._session_info is None and (user_id is not None or project_id is not None):
             self.workspace = self.workspace_manager.get_context(
                 user_id or self.workspace.user_id,
                 project_id or self.workspace.project_id,
@@ -1300,6 +1916,11 @@ class AgentLoop:
         path_context = build_path_context(
             user_id=self.workspace.user_id,
             project_id=self.workspace.project_id,
+            project_root=(
+                Path(self._session_info.directory)
+                if self._session_info is not None
+                else None
+            ),
         )
         metrics = RuntimeMetrics()
         metrics.record_model_limits(getattr(self.llm, "config", None))
@@ -1333,21 +1954,28 @@ class AgentLoop:
         )
         initial_tools = initial_agent_turn_tools(initial_surface)
         instruction_project_root = path_context.project_root
-        request_guidance = resolve_request_guidance(
-            project_root=instruction_project_root,
-            persistent_memory=self.persistent_memory,
-        )
-        request_guidance_transition = resolve_request_guidance_transition(
-            request_guidance,
-            previous_effective_fingerprint=(
-                self._last_request_guidance_fingerprint
-            ),
-        )
-        reference_guidance = resolve_memory_reference_guidance(
-            persistent_memory=self.persistent_memory,
-        )
+        initial_session_context = self._prepare_provider_session_context("", user_input)
+        if self._session_info is not None:
+            (
+                request_guidance,
+                request_guidance_transition,
+                reference_guidance,
+            ) = _session_epoch_guidance(initial_session_context)
+        else:
+            request_guidance = resolve_request_guidance(
+                project_root=instruction_project_root,
+                persistent_memory=self.persistent_memory,
+            )
+            request_guidance_transition = resolve_request_guidance_transition(
+                request_guidance,
+                previous_effective_fingerprint=(
+                    self._last_request_guidance_fingerprint
+                ),
+            )
+            reference_guidance = resolve_memory_reference_guidance(
+                persistent_memory=self.persistent_memory,
+            )
         active_request_instruction_paths = request_guidance.instruction_paths
-        initial_session_context = self.memory.get_agent_turn_context("", user_input)
         initial_context_summary = initial_session_context.trace_summary()
         initial_context_summary["runtime_model_identity_included"] = True
         initial_context_summary["instruction_context_included"] = (
@@ -1367,6 +1995,9 @@ class AgentLoop:
             user_input=user_input,
             tools=initial_tools,
             memory_messages=initial_session_context.messages,
+            system_context_messages=list(
+                initial_session_context.system_context_messages
+            ),
             request_guidance_messages=[
                 *request_guidance.system_messages,
                 *request_guidance_transition.system_messages,
@@ -1381,32 +2012,192 @@ class AgentLoop:
             access_mode=initial_surface.access_mode,
         )
         initial_options = resolve_llm_call_options("initial_agent_turn", settings)
-        initial_messages, initial_context_budget_decision = apply_context_budget(
-            initial_pack.messages,
-            tools=initial_tools,
-            runtime_lane="initial_agent_turn",
-            task_state=None,
-            config=context_budget_config_from_settings(settings),
-            model_context_tokens=_model_context_tokens(self.llm),
-            model_input_tokens=_model_input_tokens(self.llm),
-            model_output_tokens=_model_output_tokens(self.llm),
-            reserved_output_tokens=_reserved_output_tokens(self.llm, initial_options),
-        )
+        if self._session_info is not None:
+            def rebuild_initial(context: AgentTurnSessionContext):
+                guidance, transition, references = _session_epoch_guidance(context)
+                summary = context.trace_summary()
+                summary.update(
+                    {
+                        "runtime_model_identity_included": True,
+                        "instruction_context_included": guidance.root_instruction_included,
+                        "persistent_guidance_included": guidance.persistent_guidance_included,
+                        "persistent_reference_context_included": references.available,
+                        "persistent_context_included": bool(
+                            guidance.persistent_guidance_included or references.available
+                        ),
+                    }
+                )
+                pack = build_initial_agent_turn_pack(
+                    user_input=user_input,
+                    tools=initial_tools,
+                    memory_messages=context.messages,
+                    system_context_messages=list(context.system_context_messages),
+                    request_guidance_messages=[],
+                    reference_guidance_messages=[],
+                    runtime_model_identity_note=build_runtime_model_identity_note(
+                        settings.llm_provider, settings.llm_model
+                    ),
+                    current_user_included=True,
+                    agent_turn_context_summary=summary,
+                    access_mode=initial_surface.access_mode,
+                )
+                return list(pack.messages), (
+                    pack,
+                    guidance,
+                    transition,
+                    references,
+                    summary,
+                )
+
+            (
+                initial_session_context,
+                initial_messages,
+                initial_artifact,
+                initial_compaction_count,
+            ) = self._stabilize_session_provider_request(
+                initial_session_context,
+                list(initial_pack.messages),
+                (
+                    initial_pack,
+                    request_guidance,
+                    request_guidance_transition,
+                    reference_guidance,
+                    initial_context_summary,
+                ),
+                task_id="",
+                user_input=user_input,
+                tools=initial_tools,
+                options=initial_options,
+                rebuild=rebuild_initial,
+            )
+            (
+                initial_pack,
+                request_guidance,
+                request_guidance_transition,
+                reference_guidance,
+                initial_context_summary,
+            ) = initial_artifact
+            active_request_instruction_paths = request_guidance.instruction_paths
+            initial_context_budget_decision = self._session_budget_decision(
+                initial_messages,
+                initial_tools,
+                runtime_lane="initial_agent_turn",
+                compacted=initial_compaction_count > 0,
+            )
+        else:
+            initial_messages, initial_context_budget_decision = apply_context_budget(
+                initial_pack.messages,
+                tools=initial_tools,
+                runtime_lane="initial_agent_turn",
+                task_state=None,
+                config=context_budget_config_from_settings(settings),
+                model_context_tokens=_model_context_tokens(self.llm),
+                model_input_tokens=_model_input_tokens(self.llm),
+                model_output_tokens=_model_output_tokens(self.llm),
+                reserved_output_tokens=_reserved_output_tokens(self.llm, initial_options),
+            )
         validate_openai_tool_messages(initial_messages)
         metrics.record_agent_turn_context(initial_context_summary)
-        initial_execution = _execute_initial_agent_turn_with_retry(
-            llm=self.llm,
-            messages=initial_messages,
-            surface=initial_surface,
-            options=initial_options,
-            metrics=metrics,
-            model=settings.llm_model,
-        )
-        self._last_request_guidance_fingerprint = (
-            request_guidance.effective_guidance_fingerprint
-        )
+        self._check_session_interrupted()
+        initial_session_assistant_message_id = ""
+        try:
+            initial_execution = _execute_initial_agent_turn_with_retry(
+                llm=self.llm,
+                messages=initial_messages,
+                surface=initial_surface,
+                options=initial_options,
+                metrics=metrics,
+                model=settings.llm_model,
+            )
+        except Exception as exc:
+            raise
+        if (
+            self._session_info is not None
+            and is_context_overflow_failure(initial_execution.result)
+            and self._compact_session_request_if_needed(
+                initial_session_context,
+                initial_messages,
+                initial_tools,
+                initial_options,
+                overflow=True,
+            )
+        ):
+            initial_session_context = self._prepare_provider_session_context(
+                "", user_input, promote=False
+            )
+            initial_messages, initial_artifact = rebuild_initial(
+                initial_session_context
+            )
+            (
+                initial_session_context,
+                initial_messages,
+                initial_artifact,
+                _,
+            ) = self._stabilize_session_provider_request(
+                initial_session_context,
+                initial_messages,
+                initial_artifact,
+                task_id="",
+                user_input=user_input,
+                tools=initial_tools,
+                options=initial_options,
+                rebuild=rebuild_initial,
+            )
+            (
+                initial_pack,
+                request_guidance,
+                request_guidance_transition,
+                reference_guidance,
+                initial_context_summary,
+            ) = initial_artifact
+            validate_openai_tool_messages(initial_messages)
+            initial_execution = _execute_initial_agent_turn_with_retry(
+                llm=self.llm,
+                messages=initial_messages,
+                surface=initial_surface,
+                options=initial_options,
+                metrics=metrics,
+                model=settings.llm_model,
+            )
+        if self._session_info is None:
+            self._last_request_guidance_fingerprint = (
+                request_guidance.effective_guidance_fingerprint
+            )
         initial_result = initial_execution.result
         initial_elapsed = initial_execution.elapsed_ms
+        if (
+            initial_result.mode != "terminal_failure"
+            and initial_surface.enabled
+            and provider_supports_tools(self.llm)
+        ):
+            initial_session_assistant_message_id = self._start_session_assistant_step()
+        pending_initial_session_assistant_message_id = ""
+        if initial_session_assistant_message_id:
+            if initial_result.mode == "terminal_failure":
+                self._fail_session_assistant_step(
+                    initial_session_assistant_message_id,
+                    error=initial_result.failure_reason or "Initial provider turn failed.",
+                    error_code=initial_result.error_code or "provider_error",
+                )
+            else:
+                self._record_session_assistant_output(
+                    initial_session_assistant_message_id,
+                    initial_result.assistant_message,
+                )
+                if initial_result.mode == "direct_answer":
+                    self._end_session_assistant_step(
+                        initial_session_assistant_message_id,
+                        finish=str(
+                            initial_result.provider_metadata.get("finish_reason")
+                            or initial_result.provider_metadata.get("provider_finish_reason")
+                            or "stop"
+                        ),
+                        provider_metadata=initial_result.provider_metadata,
+                    )
+                else:
+                    pending_initial_session_assistant_message_id = (
+                        initial_session_assistant_message_id
+                    )
         metrics.record_initial_agent_turn(
             initial_execution,
             schema_chars=initial_pack.tool_schema_chars,
@@ -1771,10 +2562,17 @@ class AgentLoop:
                         if contract_resolved:
                             task_state.metadata["build_step_contract_resolved_recorded"] = True
                 task_state.metadata["continuation_available_tool_names"] = list(scoped_tool_names)
-                agent_turn_context = self.memory.get_agent_turn_context(
-                    task_state.task_id,
-                    user_input,
-                    include_previous_dialogue=True,
+                agent_turn_context = (
+                    self.memory.get_agent_turn_context(
+                        task_state.task_id,
+                        user_input,
+                        include_previous_dialogue=True,
+                    )
+                    if pending_initial_assistant_message is not None
+                    else self._prepare_provider_session_context(
+                        task_state.task_id,
+                        user_input,
+                    )
                 )
                 agent_turn_context_summary = agent_turn_context.trace_summary()
                 agent_turn_context_summary["runtime_model_identity_included"] = True
@@ -1787,7 +2585,17 @@ class AgentLoop:
             llm_options = resolve_llm_call_options(llm_stage, settings)
             if reusing_initial_agent_turn:
                 current_request_guidance = request_guidance
+                current_request_guidance_transition = request_guidance_transition
                 current_reference_guidance = reference_guidance
+            elif self._session_info is not None:
+                (
+                    current_request_guidance,
+                    current_request_guidance_transition,
+                    current_reference_guidance,
+                ) = _session_epoch_guidance(agent_turn_context)
+                active_request_instruction_paths = (
+                    agent_turn_context.effective_instruction_paths
+                )
             else:
                 current_request_guidance = resolve_request_guidance(
                     project_root=instruction_project_root,
@@ -1799,14 +2607,12 @@ class AgentLoop:
                 active_request_instruction_paths = (
                     current_request_guidance.instruction_paths
                 )
-            current_request_guidance_transition = (
-                resolve_request_guidance_transition(
+                current_request_guidance_transition = resolve_request_guidance_transition(
                     current_request_guidance,
                     previous_effective_fingerprint=(
                         self._last_request_guidance_fingerprint
                     ),
                 )
-            )
             trace.add_event(
                 step,
                 "request_guidance_resolved",
@@ -1846,6 +2652,9 @@ class AgentLoop:
                 task_state=task_state,
                 tools=scoped_tool_schemas,
                 memory_messages=memory_messages,
+                system_context_messages=list(
+                    agent_turn_context.system_context_messages
+                ),
                 request_guidance_messages=list(
                     (
                         *current_request_guidance.system_messages,
@@ -1905,17 +2714,94 @@ class AgentLoop:
             messages = list(prompt_pack.messages)
             context_budget_started = time.perf_counter()
             with metrics.measure("context_budget_ms"):
-                messages, context_budget_decision = apply_context_budget(
-                    messages,
-                    tools=scoped_tool_schemas,
-                    runtime_lane="agent_continuation",
-                    task_state=task_state,
-                    config=context_budget_config_from_settings(settings),
-                    model_context_tokens=_model_context_tokens(self.llm),
-                    model_input_tokens=_model_input_tokens(self.llm),
-                    model_output_tokens=_model_output_tokens(self.llm),
-                    reserved_output_tokens=_reserved_output_tokens(self.llm, llm_options),
-                )
+                if self._session_info is not None:
+                    continuation_compaction_count = 0
+                    if not reusing_initial_agent_turn:
+                        def rebuild_continuation(context: AgentTurnSessionContext):
+                            guidance, transition, references = _session_epoch_guidance(
+                                context
+                            )
+                            summary = context.trace_summary()
+                            summary.update(
+                                {
+                                    "runtime_model_identity_included": True,
+                                    "agent_turn_context_mode": "normal",
+                                }
+                            )
+                            pack = build_tool_call_pack(
+                                user_input=user_input,
+                                task_state=task_state,
+                                tools=scoped_tool_schemas,
+                                memory_messages=context.messages,
+                                system_context_messages=list(
+                                    context.system_context_messages
+                                ),
+                                request_guidance_messages=[],
+                                reference_guidance_messages=[],
+                                runtime_model_identity_note=build_runtime_model_identity_note(
+                                    settings.llm_provider, settings.llm_model
+                                ),
+                                current_user_included=True,
+                                agent_turn_context_summary=summary,
+                                access_mode=initial_surface.access_mode,
+                            )
+                            return list(pack.messages), (
+                                pack,
+                                guidance,
+                                transition,
+                                references,
+                                summary,
+                            )
+
+                        (
+                            agent_turn_context,
+                            messages,
+                            continuation_artifact,
+                            continuation_compaction_count,
+                        ) = self._stabilize_session_provider_request(
+                            agent_turn_context,
+                            messages,
+                            (
+                                prompt_pack,
+                                current_request_guidance,
+                                current_request_guidance_transition,
+                                current_reference_guidance,
+                                agent_turn_context_summary,
+                            ),
+                            task_id=task_state.task_id,
+                            user_input=user_input,
+                            tools=scoped_tool_schemas,
+                            options=llm_options,
+                            rebuild=rebuild_continuation,
+                        )
+                        (
+                            prompt_pack,
+                            current_request_guidance,
+                            current_request_guidance_transition,
+                            current_reference_guidance,
+                            agent_turn_context_summary,
+                        ) = continuation_artifact
+                        active_request_instruction_paths = (
+                            agent_turn_context.effective_instruction_paths
+                        )
+                    context_budget_decision = self._session_budget_decision(
+                        messages,
+                        scoped_tool_schemas,
+                        runtime_lane="agent_continuation",
+                        compacted=continuation_compaction_count > 0,
+                    )
+                else:
+                    messages, context_budget_decision = apply_context_budget(
+                        messages,
+                        tools=scoped_tool_schemas,
+                        runtime_lane="agent_continuation",
+                        task_state=task_state,
+                        config=context_budget_config_from_settings(settings),
+                        model_context_tokens=_model_context_tokens(self.llm),
+                        model_input_tokens=_model_input_tokens(self.llm),
+                        model_output_tokens=_model_output_tokens(self.llm),
+                        reserved_output_tokens=_reserved_output_tokens(self.llm, llm_options),
+                    )
             visible_instruction_paths = instruction_paths_from_messages(messages)
             context_budget_elapsed = elapsed_ms(context_budget_started)
             metrics.record_context_budget(context_budget_decision, elapsed_ms=context_budget_elapsed)
@@ -2036,7 +2922,15 @@ class AgentLoop:
             assistant_message, pending_initial_assistant_message, reused_initial_turn = (
                 consume_pending_initial_agent_message(pending_initial_assistant_message)
             )
+            current_session_assistant_message_id = (
+                pending_initial_session_assistant_message_id
+                if reused_initial_turn
+                else ""
+            )
+            if reused_initial_turn:
+                pending_initial_session_assistant_message_id = ""
             if not reused_initial_turn:
+                self._check_session_interrupted()
                 llm_started = time.perf_counter()
                 try:
                     assistant_message = self.llm.chat(
@@ -2044,21 +2938,67 @@ class AgentLoop:
                         tools=scoped_tool_schemas,
                         options=llm_options,
                     )
-                    self._last_request_guidance_fingerprint = (
-                        current_request_guidance.effective_guidance_fingerprint
-                    )
+                    if self._session_info is None:
+                        self._last_request_guidance_fingerprint = (
+                            current_request_guidance.effective_guidance_fingerprint
+                        )
                 except Exception as exc:
-                    metrics.record_llm_call(
-                        messages=messages,
-                        tools=scoped_tool_schemas,
-                        elapsed_ms=elapsed_ms(llm_started),
-                        stage=llm_stage,
-                        model=settings.llm_model,
-                        success=False,
-                        error_code=exc.__class__.__name__,
-                        options=llm_options,
-                    )
-                    raise
+                    recovered = False
+                    if (
+                        self._session_info is not None
+                        and is_context_overflow_failure(exc)
+                        and self._compact_session_request_if_needed(
+                            agent_turn_context,
+                            messages,
+                            scoped_tool_schemas,
+                            llm_options,
+                            overflow=True,
+                        )
+                    ):
+                        agent_turn_context = self._prepare_provider_session_context(
+                            task_state.task_id, user_input, promote=False
+                        )
+                        messages, continuation_artifact = rebuild_continuation(
+                            agent_turn_context
+                        )
+                        (
+                            agent_turn_context,
+                            messages,
+                            continuation_artifact,
+                            _,
+                        ) = self._stabilize_session_provider_request(
+                            agent_turn_context,
+                            messages,
+                            continuation_artifact,
+                            task_id=task_state.task_id,
+                            user_input=user_input,
+                            tools=scoped_tool_schemas,
+                            options=llm_options,
+                            rebuild=rebuild_continuation,
+                        )
+                        prompt_pack = continuation_artifact[0]
+                        validate_openai_tool_messages(messages)
+                        assistant_message = self.llm.chat(
+                            messages=messages,
+                            tools=scoped_tool_schemas,
+                            options=llm_options,
+                        )
+                        recovered = True
+                    if not recovered:
+                        metrics.record_llm_call(
+                            messages=messages,
+                            tools=scoped_tool_schemas,
+                            elapsed_ms=elapsed_ms(llm_started),
+                            stage=llm_stage,
+                            model=settings.llm_model,
+                            success=False,
+                            error_code=exc.__class__.__name__,
+                            options=llm_options,
+                        )
+                        raise
+                current_session_assistant_message_id = (
+                    self._start_session_assistant_step()
+                )
                 metrics.record_llm_call(
                     messages=messages,
                     tools=scoped_tool_schemas,
@@ -2086,6 +3026,10 @@ class AgentLoop:
                         ensure_ascii=False,
                     ),
                     success=True,
+                )
+                self._record_session_assistant_output(
+                    current_session_assistant_message_id,
+                    assistant_message,
                 )
             trace.add_event(
                 step,
@@ -2164,6 +3108,11 @@ class AgentLoop:
             )
 
             if not tool_calls:
+                self._end_session_assistant_step(
+                    current_session_assistant_message_id,
+                    finish=finish_reason or "stop",
+                    provider_metadata=provider_metadata,
+                )
                 candidate_final_answer = assistant_message.content or ""
                 prose_validation = validate_agent_prose_candidate(candidate_final_answer)
                 candidate_is_final = prose_validation.accepted
@@ -2262,6 +3211,9 @@ class AgentLoop:
                 task_state.metadata["pending_tool_call_count"] = len(tool_calls) - index
                 envelope = build_structured_tool_call_envelope(tool_call, mcp_registry=getattr(self, "mcp_registry", None))
                 envelope.metadata["task_id"] = task_state.task_id
+                envelope.metadata["session_assistant_message_id"] = (
+                    current_session_assistant_message_id
+                )
                 pre_execution_observation = None
                 tool_name = envelope.executable_name or envelope.tool_name
                 arguments_for_log = envelope.parsed_arguments
@@ -2386,6 +3338,11 @@ class AgentLoop:
                     claimed_paths=instruction_claims,
                 )
                 observation = observation_to_legacy_dict(observation_envelope)
+                self._settle_session_tool(
+                    current_session_assistant_message_id,
+                    str(envelope.provider_call_id or envelope.call_id or ""),
+                    observation_envelope,
+                )
                 grant_status = (
                     GRANT_COMPLETED
                     if observation_envelope.success
@@ -2801,10 +3758,16 @@ class AgentLoop:
                         trace=trace,
                         step=step,
                         task_state=task_state,
+                        assistant_message_id=current_session_assistant_message_id,
                     )
                     self._flush_deferred_memory_notes(deferred_memory_notes)
                     break
 
+            self._end_session_assistant_step(
+                current_session_assistant_message_id,
+                finish=finish_reason or "tool_calls",
+                provider_metadata=provider_metadata,
+            )
             if terminal_applied.terminal:
                 return self._finish_with_trace(trace, task_state, terminal_applied.final_answer)
 
@@ -2857,19 +3820,31 @@ class AgentLoop:
     ) -> str:
         """Run one lightweight chat-only model call with no tools."""
 
-        request_guidance = resolve_request_guidance(
-            project_root=project_root,
-            persistent_memory=self.persistent_memory,
+        session_context = (
+            self._prepare_provider_session_context(task_state.task_id, user_input)
+            if self._session_info is not None
+            else None
         )
-        request_guidance_transition = resolve_request_guidance_transition(
-            request_guidance,
-            previous_effective_fingerprint=(
-                self._last_request_guidance_fingerprint
-            ),
-        )
-        reference_guidance = resolve_memory_reference_guidance(
-            persistent_memory=self.persistent_memory,
-        )
+        if session_context is not None:
+            (
+                request_guidance,
+                request_guidance_transition,
+                reference_guidance,
+            ) = _session_epoch_guidance(session_context)
+        else:
+            request_guidance = resolve_request_guidance(
+                project_root=project_root,
+                persistent_memory=self.persistent_memory,
+            )
+            request_guidance_transition = resolve_request_guidance_transition(
+                request_guidance,
+                previous_effective_fingerprint=(
+                    self._last_request_guidance_fingerprint
+                ),
+            )
+            reference_guidance = resolve_memory_reference_guidance(
+                persistent_memory=self.persistent_memory,
+            )
         trace.add_event(
             1,
             "request_guidance_resolved",
@@ -2890,7 +3865,16 @@ class AgentLoop:
         messages = build_simple_chat_messages(
             self.memory,
             user_input,
+            history_messages=(
+                session_context.messages if session_context is not None else None
+            ),
+            current_user_included=session_context is not None,
             identity_note=build_runtime_model_identity_note(settings.llm_provider, settings.llm_model),
+            system_context_messages=(
+                list(session_context.system_context_messages)
+                if session_context is not None
+                else None
+            ),
             request_guidance_messages=[
                 *request_guidance.system_messages,
                 *request_guidance_transition.system_messages,
@@ -2900,18 +3884,62 @@ class AgentLoop:
         final_answer_options = resolve_llm_call_options("final_answer", settings)
         context_budget_started = time.perf_counter()
         with metrics.measure("context_budget_ms"):
-            messages, context_budget_decision = apply_context_budget(
-                messages,
-                tools=[],
-                runtime_lane="chat",
-                task_state=task_state,
-                config=context_budget_config_from_settings(settings),
-                simple_chat=True,
-                model_context_tokens=_model_context_tokens(self.llm),
-                model_input_tokens=_model_input_tokens(self.llm),
-                model_output_tokens=_model_output_tokens(self.llm),
-                reserved_output_tokens=_reserved_output_tokens(self.llm, final_answer_options),
-            )
+            if session_context is not None:
+                def rebuild_simple(context: AgentTurnSessionContext):
+                    rebuilt = build_simple_chat_messages(
+                        self.memory,
+                        user_input,
+                        history_messages=context.messages,
+                        current_user_included=True,
+                        identity_note=build_runtime_model_identity_note(
+                            settings.llm_provider, settings.llm_model
+                        ),
+                        system_context_messages=list(context.system_context_messages),
+                        request_guidance_messages=[],
+                        reference_guidance_messages=[],
+                    )
+                    return rebuilt, None
+
+                (
+                    session_context,
+                    messages,
+                    _,
+                    simple_compaction_count,
+                ) = self._stabilize_session_provider_request(
+                    session_context,
+                    messages,
+                    None,
+                    task_id=task_state.task_id,
+                    user_input=user_input,
+                    tools=[],
+                    options=final_answer_options,
+                    rebuild=rebuild_simple,
+                )
+                if simple_compaction_count:
+                    (
+                        request_guidance,
+                        request_guidance_transition,
+                        reference_guidance,
+                    ) = _session_epoch_guidance(session_context)
+                context_budget_decision = self._session_budget_decision(
+                    messages,
+                    [],
+                    runtime_lane="chat",
+                    compacted=simple_compaction_count > 0,
+                )
+            else:
+                messages, context_budget_decision = apply_context_budget(
+                    messages,
+                    tools=[],
+                    runtime_lane="chat",
+                    task_state=task_state,
+                    config=context_budget_config_from_settings(settings),
+                    simple_chat=True,
+                    model_context_tokens=_model_context_tokens(self.llm),
+                    model_input_tokens=_model_input_tokens(self.llm),
+                    model_output_tokens=_model_output_tokens(self.llm),
+                    reserved_output_tokens=_reserved_output_tokens(self.llm, final_answer_options),
+                )
         context_budget_elapsed = elapsed_ms(context_budget_started)
         metrics.record_context_budget(context_budget_decision, elapsed_ms=context_budget_elapsed)
         metrics.record_stage_payload(stage="context_budget", messages=messages, tools=[])
@@ -2929,6 +3957,8 @@ class AgentLoop:
                 success=True,
             )
         validate_openai_tool_messages(messages)
+        self._check_session_interrupted()
+        simple_session_assistant_message_id = ""
         llm_started = time.perf_counter()
         try:
             assistant_message = self.llm.chat(
@@ -2936,21 +3966,62 @@ class AgentLoop:
                 tools=[],
                 options=final_answer_options,
             )
-            self._last_request_guidance_fingerprint = (
-                request_guidance.effective_guidance_fingerprint
-            )
+            if self._session_info is None:
+                self._last_request_guidance_fingerprint = (
+                    request_guidance.effective_guidance_fingerprint
+                )
         except Exception as exc:
-            metrics.record_llm_call(
-                messages=messages,
-                tools=[],
-                elapsed_ms=elapsed_ms(llm_started),
-                stage="final_answer",
-                model=settings.llm_model,
-                success=False,
-                error_code=exc.__class__.__name__,
-                options=final_answer_options,
-            )
-            raise
+            recovered = False
+            if (
+                session_context is not None
+                and is_context_overflow_failure(exc)
+                and self._compact_session_request_if_needed(
+                    session_context,
+                    messages,
+                    [],
+                    final_answer_options,
+                    overflow=True,
+                )
+            ):
+                session_context = self._prepare_provider_session_context(
+                    task_state.task_id, user_input, promote=False
+                )
+                messages, _ = rebuild_simple(session_context)
+                (
+                    session_context,
+                    messages,
+                    _,
+                    _,
+                ) = self._stabilize_session_provider_request(
+                    session_context,
+                    messages,
+                    None,
+                    task_id=task_state.task_id,
+                    user_input=user_input,
+                    tools=[],
+                    options=final_answer_options,
+                    rebuild=rebuild_simple,
+                )
+                validate_openai_tool_messages(messages)
+                assistant_message = self.llm.chat(
+                    messages=messages,
+                    tools=[],
+                    options=final_answer_options,
+                )
+                recovered = True
+            if not recovered:
+                metrics.record_llm_call(
+                    messages=messages,
+                    tools=[],
+                    elapsed_ms=elapsed_ms(llm_started),
+                    stage="final_answer",
+                    model=settings.llm_model,
+                    success=False,
+                    error_code=exc.__class__.__name__,
+                    options=final_answer_options,
+                )
+                raise
+        simple_session_assistant_message_id = self._start_session_assistant_step()
         metrics.record_llm_call(
             messages=messages,
             tools=[],
@@ -2984,6 +4055,19 @@ class AgentLoop:
             f"content_chars={len(assistant_message.content or '')} tool_calls={len(assistant_message.tool_calls or [])}",
         )
         provider_metadata = extract_provider_metadata(assistant_message)
+        self._record_session_assistant_output(
+            simple_session_assistant_message_id,
+            assistant_message,
+        )
+        self._end_session_assistant_step(
+            simple_session_assistant_message_id,
+            finish=str(
+                provider_metadata.get("finish_reason")
+                or provider_metadata.get("provider_finish_reason")
+                or "stop"
+            ),
+            provider_metadata=provider_metadata,
+        )
         self.memory.add_user_message(user_input, task_id=task_state.task_id)
         self.memory.add_assistant_message(
             content=assistant_message.content,
@@ -3049,6 +4133,7 @@ class AgentLoop:
         trace: AgentTrace,
         step: int,
         task_state: TaskState,
+        assistant_message_id: str,
     ) -> None:
         """Write protocol-complete tool messages for calls skipped after terminal outcome."""
 
@@ -3058,6 +4143,11 @@ class AgentLoop:
                 tool_call,
                 reason="previous_tool_completed_task",
                 terminal_kind=terminal_kind,
+            )
+            self._settle_session_tool(
+                assistant_message_id,
+                str(getattr(tool_call, "id", "") or ""),
+                observation_envelope,
             )
             model_observation_json = observation_to_model_message_json(
                 observation_envelope,
@@ -3371,10 +4461,16 @@ class AgentLoop:
         if metrics is not None:
             metrics.record_stage_payload(stage="context_budget", messages=messages, tools=[])
         validate_openai_tool_messages(messages)
+        final_session_assistant_message_id = self._start_session_assistant_step()
         llm_started = time.perf_counter()
         try:
             assistant_message = self.llm.chat(messages=messages, tools=[], options=llm_options)
         except Exception as exc:
+            self._fail_session_assistant_step(
+                final_session_assistant_message_id,
+                error="Final responder provider turn failed.",
+                error_code=exc.__class__.__name__,
+            )
             task_state.metadata[
                 "last_terminal_responder_reject_reason"
             ] = "provider_exception"
@@ -3409,6 +4505,20 @@ class AgentLoop:
                 success=False,
             )
             return ""
+        final_provider_metadata = extract_provider_metadata(assistant_message)
+        self._record_session_assistant_output(
+            final_session_assistant_message_id,
+            assistant_message,
+        )
+        self._end_session_assistant_step(
+            final_session_assistant_message_id,
+            finish=str(
+                final_provider_metadata.get("finish_reason")
+                or final_provider_metadata.get("provider_finish_reason")
+                or "stop"
+            ),
+            provider_metadata=final_provider_metadata,
+        )
         llm_elapsed = elapsed_ms(llm_started)
         if metrics is not None:
             metrics.record_llm_call(
@@ -3760,6 +4870,16 @@ class AgentLoop:
             "incomplete_evidence",
         }:
             task_state.metadata["task_outcome_status"] = "incomplete_evidence"
+        if (
+            getattr(self, "session_events", None) is not None
+            and final_answer
+            and final_answer != self._session_last_provider_text
+        ):
+            self._publish_session_event(
+                SYNTHETIC,
+                message_id=create_session_message_id(),
+                text=final_answer,
+            )
         self.memory.ensure_task_final_assistant_message(task_state.task_id, final_answer)
         self._save_task_history_after_task(task_state, final_answer)
         self.memory.save_task_intent_summary(task_state)
@@ -3902,6 +5022,7 @@ class AgentLoop:
                 )
             duplicate = find_completed_tool_call(task_state, envelope)
             if duplicate.replay and duplicate.cached_observation is not None:
+                self._mark_session_tool_called(envelope, envelope.parsed_arguments)
                 replay_payload = {
                     "call_id": duplicate.call_id,
                     "identity": "structured_tool_call_id",
@@ -4051,6 +5172,10 @@ class AgentLoop:
             arguments = envelope.sanitized_arguments
             boundary_sanitized_arguments = dict(arguments)
             base_tool = base_tool_name(envelope.executable_name or envelope.tool_name)
+            if base_tool == "switch_workspace":
+                session_block = self._session_workspace_tool_block(envelope, arguments)
+                if session_block is not None:
+                    return session_block
             tool = self.tools.get(envelope.executable_name) or self.tools.get(envelope.tool_name) or self.tools.get(base_tool)
             if tool is None:
                 return make_blocked_observation(
@@ -4118,6 +5243,18 @@ class AgentLoop:
                         reason="tool_call_grant_runtime_projection_mismatch",
                         error="The runtime-projected tool arguments no longer match the authorized call.",
                     )
+            if self._session_cancelled is not None and self._session_cancelled.is_set():
+                return make_error_observation(
+                    envelope,
+                    "Session execution interrupted before tool dispatch.",
+                    data={
+                        "code": "session_execution_interrupted",
+                        "real_execution": False,
+                        "tool_executed": False,
+                        "stopped_before_execution": True,
+                    },
+                )
+            self._mark_session_tool_called(envelope, arguments)
             real_dispatch_started = True
             if base_tool == "sandbox_exec":
                 with host_command_context(

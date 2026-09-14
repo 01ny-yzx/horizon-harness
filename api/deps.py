@@ -10,6 +10,7 @@ from fastapi import HTTPException, Request
 from config.settings import settings
 from core.auth import validate_api_key
 from core.agent_factory import build_agent_for_workspace as _build_agent_for_workspace
+from core.agent_factory import create_session_for_workspace
 from core.agent_factory import get_workspace_context, run_in_workspace
 from core.llm import build_default_llm
 from core.loop import AgentLoop
@@ -17,12 +18,18 @@ from core.mcp_runtime_manager import get_mcp_runtime_manager
 from core.workspace import WorkspaceContext
 
 
-def build_agent_for_workspace(user_id: str | None = None, project_id: str | None = None) -> AgentLoop:
+def build_agent_for_workspace(
+    user_id: str | None = None,
+    project_id: str | None = None,
+    *,
+    session_id: str | None = None,
+) -> AgentLoop:
     """Build an AgentLoop bound to one workspace."""
 
     return _build_agent_for_workspace(
         user_id=user_id,
         project_id=project_id,
+        session_id=session_id,
         llm_factory=build_default_llm,
         runtime_manager_factory=get_mcp_runtime_manager,
     )

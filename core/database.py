@@ -22,6 +22,88 @@ DEFAULT_DATABASE_PATH = get_default_database_path()
 
 SCHEMA_STATEMENTS = (
     """
+    CREATE TABLE IF NOT EXISTS event_sequence (
+        aggregate_id TEXT PRIMARY KEY,
+        seq INTEGER NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS event (
+        id TEXT PRIMARY KEY,
+        aggregate_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        data TEXT NOT NULL,
+        time_created INTEGER NOT NULL,
+        UNIQUE (aggregate_id, seq),
+        FOREIGN KEY (aggregate_id) REFERENCES event_sequence (aggregate_id) ON DELETE CASCADE
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS event_aggregate_seq_idx ON event (aggregate_id, seq)",
+    "CREATE INDEX IF NOT EXISTS event_aggregate_type_seq_idx ON event (aggregate_id, type, seq)",
+    """
+    CREATE TABLE IF NOT EXISTS session (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        directory TEXT NOT NULL,
+        title TEXT NOT NULL,
+        time_created INTEGER NOT NULL,
+        time_updated INTEGER NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS session_user_time_idx ON session (user_id, time_created, id)",
+    "CREATE INDEX IF NOT EXISTS session_project_time_idx ON session (user_id, project_id, time_created, id)",
+    """
+    CREATE TABLE IF NOT EXISTS session_context_epoch (
+        session_id TEXT PRIMARY KEY,
+        baseline TEXT NOT NULL,
+        snapshot TEXT NOT NULL,
+        baseline_seq INTEGER NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES session (id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS session_input (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        delivery TEXT NOT NULL,
+        admitted_seq INTEGER NOT NULL,
+        promoted_seq INTEGER,
+        time_created INTEGER NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES session (id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS session_input_session_pending_delivery_seq_idx
+    ON session_input (session_id, promoted_seq, delivery, admitted_seq)
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS session_input_session_admitted_seq_idx
+    ON session_input (session_id, admitted_seq)
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS session_input_session_promoted_seq_idx
+    ON session_input (session_id, promoted_seq)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS session_message (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        time_created INTEGER NOT NULL,
+        time_updated INTEGER NOT NULL,
+        data TEXT NOT NULL,
+        UNIQUE (session_id, seq),
+        FOREIGN KEY (session_id) REFERENCES session (id) ON DELETE CASCADE
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS session_message_session_type_seq_idx ON session_message (session_id, type, seq)",
+    "CREATE INDEX IF NOT EXISTS session_message_session_time_created_id_idx ON session_message (session_id, time_created, id)",
+    """
     CREATE TABLE IF NOT EXISTS memory_user_preference (
         user_id TEXT NOT NULL,
         key TEXT NOT NULL,
