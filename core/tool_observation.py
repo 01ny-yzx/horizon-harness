@@ -12,7 +12,7 @@ from typing import Any
 
 from config.settings import settings
 from core.document_result_compaction import compact_document_result
-from core.observation_compaction import compact_observation_for_model
+from core.observation_compaction import bounded_read_file_page, compact_observation_for_model
 from core.source_reference import resolve_source_file_metadata
 from core.tool_result_store import ToolResultStore, resolve_tool_artifact_metadata
 from core.tool_call_schema import ToolCallEnvelope
@@ -186,9 +186,12 @@ def normalize_tool_result(envelope: ToolCallEnvelope, raw_result: Any) -> ToolOb
         success = status == ToolObservationStatus.SUCCESS
     else:
         status = ToolObservationStatus.SUCCESS if success else ToolObservationStatus.FAILED
+    bounded_read_page = bounded_read_file_page(data) if tool == "read_file" else None
     output_text = (
         ""
         if tool in {"read_file", "read_document"} and not preliminary_success
+        else str(bounded_read_page.get("content") or "")
+        if bounded_read_page is not None
         else build_observation_output_text(data, metadata, max_chars=MAX_MODEL_TEXT_CHARS)
     )
     return _observation(
@@ -784,7 +787,11 @@ def _observation(
         message=_truncate(message, MAX_TEXT_CHARS),
         data=sanitize_unicode(data or {}),
         metadata=_trim_mapping(metadata or {}, MAX_TEXT_CHARS),
-        output_text=_truncate(output_text, MAX_TEXT_CHARS),
+        output_text=(
+            output_text
+            if bounded_read_file_page(data or {}) is not None
+            else _truncate(output_text, MAX_TEXT_CHARS)
+        ),
         output_path=output_path,
         url=url,
         exit_code=exit_code,
@@ -946,7 +953,8 @@ def _externalize_tool_result(
         arguments = _arguments_dict(envelope)
         metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
         raw_path = str(metadata.get("path") or data.get("path") or data.get("output_path") or data.get("file_path") or arguments.get("path") or "")
-        if raw_path and not data.get("source_ref"):
+        bounded_read_page = bounded_read_file_page(data) if tool == "read_file" else None
+        if raw_path and not data.get("source_ref") and bounded_read_page is None:
             source = resolve_source_file_metadata(
                 raw_path,
                 operation="write_result" if tool in {"write_file", "replace_in_file"} else "read",
@@ -1155,6 +1163,16 @@ def finalize_model_visible_tool_data(
             pure["result"] = safe_result
         return pure
     if tool == "read_file":
+        bounded_page = bounded_read_file_page(canonical)
+        if bounded_page is not None:
+            canonical["result"] = bounded_page
+            for key, value in bounded_page.items():
+                canonical[key] = value
+            canonical["content"] = str(bounded_page.get("content") or "")
+            canonical["text"] = canonical["content"]
+            canonical["preview_chars"] = len(canonical["content"])
+            canonical["compacted"] = False
+            return sanitize_unicode(canonical)
         result = canonical.get("result")
         result_mapping = dict(result) if isinstance(result, dict) else None
         body = ""
@@ -1185,7 +1203,6 @@ def finalize_model_visible_tool_data(
         canonical["preview_chars"] = len(visible)
         canonical["compacted"] = bool(len(body) > len(visible))
         return sanitize_unicode(canonical)
-
     if tool == "read_document":
         result = canonical.get("result")
         keep = {
@@ -1204,7 +1221,7 @@ def finalize_model_visible_tool_data(
         else:
             projected["preview_chars"] = len(str(result or ""))
         return sanitize_unicode(projected)
-    return canonical
+    return sanitize_unicode(canonical)
 
 
 def _bounded_preview(value: str, limit: int) -> str:

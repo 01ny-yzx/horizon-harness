@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -191,6 +192,32 @@ def _compact_read_file(payload: dict[str, Any], metadata: dict[str, Any], max_pr
         summary = _base_summary(payload, metadata)
         summary.update({"tool_name": "read_file", "requested_path": _requested_path(payload, metadata)})
         return summary, "", ["data.result", "data.content", "data.text"], "read_file_failure", "failed read body omitted"
+    result = data.get("result")
+    bounded_page = bounded_read_file_page(result) or bounded_read_file_page(data)
+    if bounded_page is not None:
+        summary = _base_summary(payload, metadata)
+        summary.update(
+            {
+                "tool_name": "read_file",
+                "path": _path(payload, metadata),
+                "content": str(bounded_page.get("content") or ""),
+                "line_start": int(bounded_page.get("line_start") or 1),
+                "line_end": int(bounded_page.get("line_end") or 0),
+                "truncated": bool(bounded_page.get("truncated")),
+                "next_offset": bounded_page.get("next_offset"),
+                "total_lines": bounded_page.get("total_lines"),
+                "page_bytes": int(bounded_page.get("page_bytes") or 0),
+                **_source_metadata(payload, data),
+                **_content_metadata(payload, data),
+            }
+        )
+        return (
+            summary,
+            "",
+            [],
+            "read_file_bounded_page",
+            "read_file page is already bounded by the Read tool",
+        )
     text = _first_text(payload)
     path = _path(payload, metadata)
     content_ref = _real_content_ref(payload, data)
@@ -209,6 +236,27 @@ def _compact_read_file(payload: dict[str, Any], metadata: dict[str, Any], max_pr
         }
     )
     return summary, content_ref, ["data.content", "data.text"], "read_file_preview_ref", "read_file content compacted to preview and ref"
+
+
+def bounded_read_file_page(value: Any) -> dict[str, Any] | None:
+    candidates = (value.get("result"), value) if isinstance(value, Mapping) else (value,)
+    required = {"content", "line_start", "line_end", "truncated", "next_offset"}
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping) or not required.issubset(candidate):
+            continue
+        if not isinstance(candidate.get("content"), str):
+            continue
+        if isinstance(candidate.get("line_start"), bool) or not isinstance(candidate.get("line_start"), int):
+            continue
+        if isinstance(candidate.get("line_end"), bool) or not isinstance(candidate.get("line_end"), int):
+            continue
+        if not isinstance(candidate.get("truncated"), bool):
+            continue
+        next_offset = candidate.get("next_offset")
+        if next_offset is not None and (isinstance(next_offset, bool) or not isinstance(next_offset, int)):
+            continue
+        return {str(key): sanitize_unicode(item) for key, item in candidate.items()}
+    return None
 
 
 def _compact_read_document(payload: dict[str, Any], metadata: dict[str, Any], max_preview_chars: int) -> tuple[dict[str, Any], str, list[str], str, str]:

@@ -191,12 +191,16 @@ def main() -> None:
             text_file = root / "ok.txt"
             text_file.write_text("read-file-success", encoding="utf-8")
             success_raw = tool_read_file(str(text_file))
-            assert success_raw["success"] is True and success_raw["data"] == "read-file-success"
+            success_page = success_raw["data"]
+            assert success_raw["success"] is True and isinstance(success_page, dict)
+            assert success_page["content"].startswith("1: read-file-success")
+            assert success_page["line_start"] == 1 and success_page["line_end"] == 1
+            assert success_page["truncated"] is False and success_page["next_offset"] is None
             assert success_raw["metadata"]["path"] == str(text_file)
             assert isinstance(success_raw["metadata"]["path_grounding"], dict)
             success = normalize_tool_result(_envelope("success", text_file), success_raw)
-            assert success.success is True and success.output_text == "read-file-success"
-            assert success.source_ref == str(text_file)
+            assert success.success is True and success.output_text == success_page["content"]
+            assert not success.source_ref
             assert not success.content_ref
             assert not list(artifact_dir.glob("*"))
     finally:

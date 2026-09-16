@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from core.observation_compaction import compact_observation_for_model, estimate_observation_chars
+from core.observation_compaction import (
+    bounded_read_file_page,
+    compact_observation_for_model,
+    estimate_observation_chars,
+)
 from core.tool_execution_authorization import base_tool_name
 from core.unicode_safety import sanitize_unicode
 
@@ -159,6 +163,7 @@ def _build_one_context(source: str, observation: dict[str, Any], outcome: Any, *
     )
     refs = _refs(compacted, summary)
     data_summary = _tool_data_summary(base, summary, data)
+    read_page = bounded_read_file_page(data) if base == "read_file" else None
     stopped_before_execution = (
         data.get("stopped_before_execution")
         if "stopped_before_execution" in data
@@ -189,7 +194,11 @@ def _build_one_context(source: str, observation: dict[str, Any], outcome: Any, *
         "data_summary": data_summary,
         "preview": preview,
         "refs": refs,
-        "truncated": bool(summary.get("truncated") or trace_summary.get("has_large_content") or refs),
+        "truncated": (
+            bool(read_page["truncated"])
+            if read_page is not None
+            else bool(summary.get("truncated") or trace_summary.get("has_large_content") or refs)
+        ),
         "compacted": True,
         "original_chars": int(compacted.get("original_chars") or trace_summary.get("original_chars") or 0),
         "compacted_chars": int(compacted.get("compacted_chars") or trace_summary.get("compacted_chars") or 0),
@@ -213,7 +222,11 @@ def _tool_data_summary(base: str, summary: dict[str, Any], data: dict[str, Any])
         result["results"] = _bounded_results(data.get("results") or summary.get("results") or [])
         return {key: value for key, value in result.items() if value not in ("", None, [], {})}
     if base == "read_file":
-        return _pick(data, summary, ("requested_path", "path", "file_path", "filename", "preview", "excerpt", "error", "error_code", "path_grounding", "source_ref", "source_kind", "source_chars", "source_bytes", "source_sha256", "source_mime", "source_encoding", "source_is_text", "content_ref", "chars", "visible_chars", "preview_chars", "output_text_chars", "truncated"))
+        result = _pick(data, summary, ("requested_path", "path", "file_path", "filename", "line_start", "line_end", "next_offset", "total_lines", "page_bytes", "preview", "excerpt", "error", "error_code", "path_grounding", "source_ref", "source_kind", "source_chars", "source_bytes", "source_sha256", "source_mime", "source_encoding", "source_is_text", "content_ref", "chars", "visible_chars", "preview_chars", "output_text_chars", "truncated"))
+        content = data.get("content") if isinstance(data.get("content"), str) else summary.get("content")
+        if isinstance(content, str) and content:
+            result["content"] = content
+        return result
     if base == "read_document":
         result = _pick(
             data,

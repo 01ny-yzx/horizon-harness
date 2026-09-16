@@ -10,7 +10,6 @@ from core.agent_access_policy import get_agent_access_mode
 from core.finalization_context_snapshot import FinalizationContextSnapshot
 from core.unicode_safety import sanitize_unicode
 
-SINGLE_FILE_READ_FINAL_CONTENT_CHAR_LIMIT = 12000
 REMOVED_CONTINUATION_RUNTIME_SECTIONS = (
     "available_tool_names",
     "recent_observations",
@@ -470,14 +469,10 @@ def single_file_read_observation_payload(read_observation: dict[str, Any]) -> di
     )
     original_chars = len(content)
     was_truncated = _truthy(observation.get("truncated")) or _truthy(data.get("truncated"))
-    bounded_content = content
-    if len(bounded_content) > SINGLE_FILE_READ_FINAL_CONTENT_CHAR_LIMIT:
-        bounded_content = bounded_content[:SINGLE_FILE_READ_FINAL_CONTENT_CHAR_LIMIT]
-        was_truncated = True
-    visible_chars = len(bounded_content)
+    visible_chars = len(content)
     return {
         "file_path": path,
-        "file_content": bounded_content,
+        "file_content": content,
         "content_truncated": bool(was_truncated),
         "visible_chars": visible_chars,
         "original_chars": int(_int_value(observation.get("original_chars"), data.get("original_chars")) or original_chars),

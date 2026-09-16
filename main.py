@@ -2,9 +2,60 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from config.settings import settings
 from core.agent_factory import create_session_for_workspace
 from core.session import SessionService
+from core.session_message import SessionMessage
+
+
+def _render_session_turn_output(
+    messages: Iterable[SessionMessage],
+    *,
+    after_seq: int,
+) -> str | None:
+    """Return the last user-visible output created after one admission."""
+
+    output: str | None = None
+    for message in messages:
+        if message.seq <= after_seq:
+            continue
+        if message.type == "synthetic":
+            text = str(message.data.get("text") or "")
+        elif message.type == "assistant":
+            content = message.data.get("content")
+            if not isinstance(content, list):
+                continue
+            text = "".join(
+                str(item.get("text") or "")
+                for item in content
+                if isinstance(item, dict) and item.get("type") == "text"
+            )
+        else:
+            continue
+        if text:
+            output = text
+    return output
+
+
+def _run_session_turn(
+    sessions: SessionService,
+    session_id: str,
+    user_input: str,
+) -> str | None:
+    """Admit one CLI prompt, synchronously run it, and read this turn's output."""
+
+    admitted = sessions.prompt(
+        session_id,
+        user_input,
+        resume=False,
+    )
+    sessions.resume(session_id)
+    return _render_session_turn_output(
+        sessions.context(session_id),
+        after_seq=admitted.admitted_seq,
+    )
 
 
 def main() -> None:
@@ -33,15 +84,12 @@ def main() -> None:
             break
 
         try:
-            admitted = sessions.prompt(session.id, user_input)
+            output = _run_session_turn(sessions, session.id, user_input)
         except Exception as exc:  # noqa: BLE001
-            print(f"\nPrompt admission failed: {exc}")
+            print(f"\nSession execution failed: {exc}")
             continue
-        print("\nPrompt admitted:")
-        print(
-            f"session_id={admitted.session_id} message_id={admitted.id} "
-            f"admitted_seq={admitted.admitted_seq} delivery={admitted.delivery}"
-        )
+        if output is not None:
+            print(f"\n{output}")
 
 
 if __name__ == "__main__":

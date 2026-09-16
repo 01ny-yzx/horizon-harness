@@ -8,6 +8,7 @@ Failure: ``{"success": False, "error": ...}``
 
 from __future__ import annotations
 
+import codecs
 import hashlib
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,13 @@ from core.file_output_ux import (
     safe_filename,
 )
 from core.path_zone_policy import evaluate_file_output_path_zone
+
+
+MAX_READ_LINES = 2000
+MAX_READ_BYTES = 50 * 1024
+MAX_LINE_LENGTH = 2000
+MAX_LINE_SUFFIX = f"... (line truncated to {MAX_LINE_LENGTH} chars)"
+_READ_CHUNK_BYTES = 64 * 1024
 
 
 def _denied_response(target: Any) -> dict[str, Any]:
@@ -227,11 +235,25 @@ def list_files(path: str = ".", raw_requested_path: str | None = None) -> dict[s
         return {"success": False, "error": str(exc)}
 
 
-def read_file(path: str, raw_requested_path: str | None = None) -> dict[str, Any]:
-    """Read a UTF-8 text file."""
+def read_file(
+    path: str,
+    offset: int = 1,
+    limit: int = MAX_READ_LINES,
+    raw_requested_path: str | None = None,
+) -> dict[str, Any]:
+    """Read one bounded, line-numbered page from a UTF-8 text file."""
 
     decision: FileAccessDecision | None = None
     try:
+        pagination_error = _read_pagination_error(offset=offset, limit=limit)
+        if pagination_error:
+            return _read_file_failure_response(
+                decision=None,
+                requested_path=path,
+                error=pagination_error,
+                error_code="invalid_read_pagination",
+                data={"requested_path": path, "offset": offset, "limit": limit},
+            )
         decision = _read_decision(path, raw_requested_path)
         if not decision.allowed or not decision.resolved_path:
             denied = _access_denied_response(decision)
@@ -259,10 +281,57 @@ def read_file(path: str, raw_requested_path: str | None = None) -> dict[str, Any
                 data={"requested_path": path, "path": str(target)},
             )
 
-        content = target.read_text(encoding="utf-8")
+        page = _read_utf8_page(target, offset=offset, limit=limit)
+        if not page["lines"] and offset != 1:
+            return _read_file_failure_response(
+                decision=decision,
+                requested_path=path,
+                error=(
+                    f"Offset {offset} is out of range for this file "
+                    f"({page['total_lines']} lines)."
+                ),
+                error_code="offset_out_of_range",
+                data={
+                    "requested_path": path,
+                    "path": str(target),
+                    "offset": offset,
+                    "total_lines": page["total_lines"],
+                },
+            )
+        lines = list(page["lines"])
+        line_end = offset + len(lines) - 1
+        next_offset = line_end + 1 if page["truncated"] else None
+        numbered = "\n".join(
+            f"{line_number}: {line}"
+            for line_number, line in enumerate(lines, start=offset)
+        )
+        if page["byte_capped"]:
+            footer = (
+                f"(Output capped at {MAX_READ_BYTES // 1024} KB. "
+                f"Showing lines {offset}-{line_end}. "
+                f"Use offset={next_offset} to continue.)"
+            )
+        elif page["truncated"]:
+            footer = (
+                f"(Showing lines {offset}-{line_end}. "
+                f"Use offset={next_offset} to continue.)"
+            )
+        else:
+            footer = f"(End of file - total {page['total_lines']} lines)"
+        content = f"{numbered}\n\n{footer}" if numbered else footer
+        data = {
+            "path": str(target),
+            "content": content,
+            "line_start": offset,
+            "line_end": line_end,
+            "truncated": bool(page["truncated"]),
+            "next_offset": next_offset,
+            "total_lines": page["total_lines"],
+            "page_bytes": int(page["page_bytes"]),
+        }
         return {
             "success": True,
-            "data": content,
+            "data": data,
             "metadata": _read_execution_metadata(
                 decision,
                 fallback_path=str(target),
@@ -292,6 +361,103 @@ def read_file(path: str, raw_requested_path: str | None = None) -> dict[str, Any
                 "path": str(decision.resolved_path) if decision is not None and decision.resolved_path else "",
             },
         )
+
+
+def _read_pagination_error(*, offset: Any, limit: Any) -> str:
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 1:
+        return "offset must be an integer greater than or equal to 1."
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_READ_LINES:
+        return f"limit must be an integer between 1 and {MAX_READ_LINES}."
+    return ""
+
+
+def _read_utf8_page(target: Path, *, offset: int, limit: int) -> dict[str, Any]:
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="strict")
+    lines: list[str] = []
+    pending = ""
+    line_truncated = False
+    line_number = 1
+    page_bytes = 0
+    truncated = False
+    byte_capped = False
+    reached_eof = False
+
+    def append_fragment(fragment: str) -> None:
+        nonlocal pending, line_truncated
+        if line_truncated:
+            return
+        remaining = MAX_LINE_LENGTH + 1 - len(pending)
+        if remaining > 0:
+            pending += fragment[:remaining]
+        if len(pending) > MAX_LINE_LENGTH or len(fragment) > remaining:
+            pending = pending[:MAX_LINE_LENGTH]
+            line_truncated = True
+
+    def finish_line() -> bool:
+        nonlocal pending, line_truncated, line_number
+        nonlocal page_bytes, truncated, byte_capped
+        text = pending
+        if not line_truncated and text.endswith("\r"):
+            text = text[:-1]
+        if line_truncated:
+            text = text[:MAX_LINE_LENGTH] + MAX_LINE_SUFFIX
+        pending = ""
+        line_truncated = False
+        if line_number < offset:
+            line_number += 1
+            return True
+        if len(lines) >= limit:
+            truncated = True
+            return False
+        size = len(text.encode("utf-8")) + (1 if lines else 0)
+        if page_bytes + size > MAX_READ_BYTES:
+            truncated = True
+            byte_capped = True
+            return False
+        lines.append(text)
+        page_bytes += size
+        line_number += 1
+        return True
+
+    def consume(text: str) -> bool:
+        nonlocal truncated
+        remainder = text
+        while True:
+            newline = remainder.find("\n")
+            if newline < 0:
+                if len(lines) >= limit and remainder:
+                    truncated = True
+                    return False
+                append_fragment(remainder)
+                return True
+            append_fragment(remainder[:newline])
+            remainder = remainder[newline + 1 :]
+            if not finish_line():
+                return False
+
+    with target.open("rb") as stream:
+        while True:
+            chunk = stream.read(_READ_CHUNK_BYTES)
+            if not chunk:
+                reached_eof = True
+                tail = decoder.decode(b"", final=True)
+                if tail and not consume(tail):
+                    reached_eof = False
+                break
+            if not consume(decoder.decode(chunk, final=False)):
+                break
+
+    if reached_eof and (pending or line_truncated):
+        finish_line()
+
+    total_lines = line_number - 1 if reached_eof else None
+    return {
+        "lines": lines,
+        "truncated": truncated,
+        "byte_capped": byte_capped,
+        "page_bytes": page_bytes,
+        "total_lines": total_lines,
+    }
 
 
 def read_document(
@@ -476,14 +642,27 @@ FILE_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read a local UTF-8 plain-text file, source file, or configuration file and return its raw text. It accepts a local filesystem path only and does not parse document sheets, tables, pages, paragraphs, or slides. The path must not be a URL or URI; use fetch_url for HTTP(S) network resources.",
+            "description": "Read one bounded, line-numbered page from a local UTF-8 plain-text file, source file, or configuration file. Use offset to continue large files. It accepts a local filesystem path only and does not parse document sheets, tables, pages, paragraphs, or slides. The path must not be a URL or URI; use fetch_url for HTTP(S) network resources.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
                         "description": "Local filesystem path to read. URLs and URIs are not accepted.",
-                    }
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "1-based line number to start reading from.",
+                        "default": 1,
+                        "minimum": 1,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of lines to read, up to 2000.",
+                        "default": MAX_READ_LINES,
+                        "minimum": 1,
+                        "maximum": MAX_READ_LINES,
+                    },
                 },
                 "required": ["path"],
             },
