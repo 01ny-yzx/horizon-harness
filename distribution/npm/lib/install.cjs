@@ -90,6 +90,19 @@ async function acquireLock(root, timeout = 300000) {
     }
   }
 }
+async function renameWithRetry(source, destination, options = {}) {
+  const platform = options.platform || process.platform;
+  const rename = options.rename || fs.renameSync;
+  const deadline = Date.now() + (options.timeout ?? 5000);
+  while (true) {
+    try { rename(source, destination); return; }
+    catch (error) {
+      if (platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || Date.now() >= deadline) throw error;
+      // Windows Defender or the loader may briefly retain a freshly checked exe.
+      await new Promise(resolve => setTimeout(resolve, options.interval ?? 100));
+    }
+  }
+}
 async function install(options = {}) {
   const root = options.root || path.resolve(__dirname, '..');
   const version = options.version || require(path.join(root, 'package.json')).version;
@@ -135,20 +148,20 @@ async function install(options = {}) {
     if (!target.startsWith('windows')) fs.chmodSync(candidate, 0o755);
     if (command(candidate, ['--version']).trim() !== `Horizon ${version}`) throw new Error('Horizon executable version mismatch');
     fs.writeFileSync(path.join(unpack, 'horizon', 'installation.json'), JSON.stringify({version, target, sha256:item.sha256}));
-    if (fs.existsSync(native)) fs.renameSync(native, backup);
+    if (fs.existsSync(native)) await renameWithRetry(native, backup);
     try {
-      fs.renameSync(path.join(unpack, 'horizon'), native);
+      await renameWithRetry(path.join(unpack, 'horizon'), native);
     } catch (error) {
       if (fs.existsSync(backup)) {
-        try { fs.renameSync(backup, native); }
+        try { await renameWithRetry(backup, native); }
         catch { keepStage = true; throw new Error(`Installation failed; previous files preserved at ${backup}`); }
       }
       throw error;
     }
     return executable;
   } finally {
-    if (!keepStage) fs.rmSync(stage, {recursive:true, force:true});
+    if (!keepStage) fs.rmSync(stage, {recursive:true, force:true, maxRetries:10, retryDelay:100});
   }
   } finally { release(); }
 }
-module.exports = {targetFor, validateManifest, safeEntries, acquireLock, download, install};
+module.exports = {targetFor, validateManifest, safeEntries, acquireLock, download, renameWithRetry, install};

@@ -144,3 +144,17 @@ test('update timeout stops package-manager descendants too', async () => {
     assert.equal(fs.readFileSync(heartbeat,'utf8'),before);
   } finally {fs.rmSync(temp,{recursive:true,force:true});}
 });
+test('Windows directory promotion retries only transient sharing violations', async () => {
+  const { renameWithRetry }=require('../npm/lib/install.cjs');
+  let attempts=0;
+  await renameWithRetry('stage','native',{platform:'win32',timeout:100,interval:1,rename:()=>{
+    attempts++;if(attempts<3)throw Object.assign(new Error('scan in progress'),{code:'EPERM'});
+  }});
+  assert.equal(attempts,3);
+  attempts=0;
+  await assert.rejects(renameWithRetry('stage','native',{platform:'win32',timeout:5,interval:1,rename:()=>{
+    attempts++;throw Object.assign(new Error('locked'),{code:'EACCES'});
+  }}),/locked/);
+  assert.ok(attempts>1);
+  await assert.rejects(renameWithRetry('stage','native',{platform:'win32',rename:()=>{throw Object.assign(new Error('missing'),{code:'ENOENT'});}}),/missing/);
+});
