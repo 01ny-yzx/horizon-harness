@@ -77,6 +77,7 @@ Type `/` to see commands, then use ↑↓ and Enter to select.
 | `/new` | Start a conversation |
 | `/search` | Configure web search |
 | `/language` | Change the interface language |
+| `/update` | Check for updates and update Horizon |
 | `/help` | Help and keyboard settings |
 
 New conversations use the global default model; existing conversations keep their original model. Enter sends a message; Shift+Enter adds a line. Type `exit` or press `Ctrl+Q` to quit.

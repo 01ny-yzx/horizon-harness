@@ -61,6 +61,7 @@ mkdir "$STAGE/unpack"
 [ -x "$STAGE/unpack/horizon/horizon" ] || die 'Executable missing from archive'
 [ "$("$STAGE/unpack/horizon/horizon" --version)" = "Horizon $VERSION" ] || die 'Executable version check failed'
 printf '%s\n' "$EXPECTED_SHA" > "$STAGE/unpack/horizon/.horizon-managed"
+printf '%s\n' "$BIN" > "$STAGE/unpack/horizon/.horizon-bin"
 if [ -e "$DEST" ] || [ -L "$DEST" ]; then
   [ ! -L "$DEST" ] && [ -f "$DEST/.horizon-managed" ] || die 'Refusing to replace an unmanaged directory'
   mv "$DEST" "$STAGE/previous"

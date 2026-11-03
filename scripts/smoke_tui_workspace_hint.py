@@ -53,18 +53,23 @@ class WorkspaceFooterUI(unittest.IsolatedAsyncioTestCase):
         field = app.query_one(selector)
         return [line.text for line in field.render_lines(Region(0, 0, field.region.width, field.region.height))]
 
-    async def test_owned_home_directory_is_shown_at_right_with_model_on_left(self):
+    async def test_directory_follows_model_and_version_is_at_right(self):
         from tui.app import HorizonApp
         from scripts.smoke_tui_ui import FakeClient
         app = HorizonApp(FakeClient(), local_directory=str(Path.home() / 'fixture-project'))
         async with app.run_test(size=(100, 30)) as pilot:
             await pilot.pause(.05)
-            self.assertTrue(self.lines(app)[-1].endswith('~/fixture-project'))
+            self.assertTrue(self.lines(app)[-1].rstrip().endswith('~/fixture-project'))
             self.assertIn('offline-test', ''.join(self.lines(app, '#composer-hint')))
             hint = app.query_one('#workspace-hint')
             left = app.query_one('#composer-hint')
             footer = app.query_one('#composer-footer')
-            self.assertEqual(hint.region.right, footer.content_region.right)
+            version = app.query_one('#version-hint')
+            from tui.version import __version__
+            self.assertEqual(self.lines(app, '#version-hint')[-1].strip(), f'v{__version__}')
+            self.assertEqual(version.region.right, footer.content_region.right)
+            self.assertEqual(hint.region.right, version.region.x)
+            self.assertNotIn('/ commands', ''.join(self.lines(app, '#composer-hint')))
             self.assertEqual(hint.region.y, left.region.y)
             self.assertLessEqual(left.region.right, hint.region.x)
 
@@ -81,10 +86,10 @@ class WorkspaceFooterUI(unittest.IsolatedAsyncioTestCase):
             for sid, expected in [('ses_a', '/srv/project-a'), ('ses_b', '/srv/project-b'), ('ses_a', '/srv/project-a')]:
                 await app._open(sid)
                 await pilot.pause(.03)
-                self.assertEqual(self.lines(app)[-1].strip(), expected)
+                self.assertEqual(self.lines(app)[-1].strip().removeprefix('· '), expected)
             await app.action_new_session()
             await pilot.pause(.03)
-            self.assertEqual(self.lines(app)[-1].strip(), '/srv/home')
+            self.assertEqual(self.lines(app)[-1].strip().removeprefix('· '), '/srv/home')
 
     async def test_remote_home_unknown_session_and_detail_fetch_never_guess_local_cwd(self):
         from tui.app import HorizonApp
@@ -100,7 +105,7 @@ class WorkspaceFooterUI(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(''.join(self.lines(app)).strip(), '')
             await app._open('ses_remote')
             await pilot.pause(.03)
-            self.assertEqual(self.lines(app)[-1].strip(), '/remote/server/project')
+            self.assertEqual(self.lines(app)[-1].strip().removeprefix('· '), '/remote/server/project')
             await app._open('ses_unknown')
             await pilot.pause(.03)
             self.assertEqual(''.join(self.lines(app)).strip(), '')
@@ -134,7 +139,11 @@ class WorkspaceFooterUI(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause(.05)
                 lines = self.lines(app)
                 self.assertEqual(lines[0].strip(), '')
-                self.assertTrue(lines[-1].endswith('project-tail'), (width, lines))
+                self.assertTrue(lines[-1].rstrip().endswith('project-tail' if width >= 80 else 'tail'), (width, lines))
+                hint = app.query_one('#workspace-hint')
+                version = app.query_one('#version-hint')
+                self.assertLessEqual(hint.region.right, version.region.x)
+                self.assertTrue(self.lines(app, '#version-hint')[-1].strip().startswith('v'))
 
 
 if __name__ == '__main__':

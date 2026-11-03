@@ -68,3 +68,79 @@ test('download handles closed large HTTP bodies and bounded redirects', async ()
     fs.rmSync(root, {recursive:true, force:true});
   }
 });
+test('update handoff accepts only stable versions and retains install prefix', () => {
+  const { validateRequest, packagePrefix } = require('../npm/lib/update.cjs');
+  assert.equal(validateRequest({version:'1.0.12'}), '1.0.12');
+  for (const version of ['1.0.2; echo bad','1.0.2-beta','--global','01.0.2']) {
+    assert.throws(() => validateRequest({version}), /version/i);
+  }
+  assert.equal(packagePrefix('/usr/local/lib/node_modules/horizon-harness','linux'), '/usr/local');
+  assert.equal(packagePrefix('C:\\custom\\node_modules\\horizon-harness','win32'), 'C:\\custom');
+});
+test('npm update waits for native shutdown, installs pinned version, and starts a fresh launcher', async () => {
+  const { launch } = require('../npm/lib/update.cjs');
+  const prefix = fs.mkdtempSync(path.join(os.tmpdir(),'horizon-update-test-'));
+  const root = path.join(prefix, 'node_modules/horizon-harness');
+  fs.mkdirSync(path.join(root, 'native'), {recursive:true});
+  const calls=[];
+  try {
+    const result=await launch('fake-native', ['--project','test'], {root,npmCLI:'fake-npm-cli.js',
+      run:async (file,args,options={}) => {
+        calls.push({file,args,env:options.env});
+        if(calls.length === 1) {
+          assert.equal(options.env.HORIZON_NPM_ROOT,root);
+          fs.writeFileSync(options.env.HORIZON_UPDATE_REQUEST,JSON.stringify({version:'1.0.2'}));
+          return {code:85,signal:null};
+        }
+        if(calls.length === 2) {
+          fs.writeFileSync(path.join(root,'native/installation.json'),JSON.stringify({version:'1.0.2'}));
+        }
+        return {code:0,signal:null};
+      }});
+    assert.equal(result.code,0);
+    assert.deepEqual(calls[1].args,['fake-npm-cli.js','install','--global','--prefix',prefix,'horizon-harness@1.0.2']);
+    assert.deepEqual(calls[2].args,[path.join(root,'bin/horizon.cjs'),'--project','test']);
+    assert.equal(fs.existsSync(calls[0].env.HORIZON_UPDATE_REQUEST),false);
+  } finally {fs.rmSync(prefix,{recursive:true,force:true});}
+});
+test('failed npm update never restarts or reports success', async () => {
+  const { launch }=require('../npm/lib/update.cjs');
+  const prefix=fs.mkdtempSync(path.join(os.tmpdir(),'horizon-failed-update-'));
+  const root=path.join(prefix,'node_modules/horizon-harness');
+  let count=0;
+  try {
+    const result=await launch('fake-native',[],{root,npmCLI:'fake-npm',run:async (file,args,options={})=>{
+      count++;
+      if(count===1){fs.writeFileSync(options.env.HORIZON_UPDATE_REQUEST,JSON.stringify({version:'1.0.2'}));return {code:85,signal:null};}
+      return {code:1,signal:null};
+    }});
+    assert.equal(count,2);assert.equal(result.code,1);
+  } finally {fs.rmSync(prefix,{recursive:true,force:true});}
+});
+test('real child-process handoff upgrades after exit and restarts without requiring the old launcher', async () => {
+  const { launch }=require('../npm/lib/update.cjs');
+  const prefix=fs.mkdtempSync(path.join(os.tmpdir(),'horizon-handoff-e2e-'));
+  const root=path.join(prefix,'node_modules/horizon-harness');
+  fs.mkdirSync(path.join(root,'native'),{recursive:true});fs.mkdirSync(path.join(root,'bin'));
+  const native=path.join(prefix,'native.cjs'), npm=path.join(prefix,'npm-cli.js'), marker=path.join(prefix,'restarted');
+  fs.writeFileSync(native,`require('node:fs').writeFileSync(process.env.HORIZON_UPDATE_REQUEST,JSON.stringify({version:'1.0.2'}));process.exit(85);`);
+  fs.writeFileSync(npm,`require('node:fs').writeFileSync(${JSON.stringify(path.join(root,'native/installation.json'))},JSON.stringify({version:'1.0.2'}));`);
+  fs.writeFileSync(path.join(root,'bin/horizon.cjs'),`require('node:fs').writeFileSync(${JSON.stringify(marker)},'ok');`);
+  try {
+    const result=await launch(process.execPath,[native],{root,npmCLI:npm});
+    assert.equal(result.code,0);assert.equal(fs.readFileSync(marker,'utf8'),'ok');
+  } finally {fs.rmSync(prefix,{recursive:true,force:true});}
+});
+test('update timeout stops package-manager descendants too', async () => {
+  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'horizon-timeout-tree-'));
+  const heartbeat=path.join(temp,'heartbeat');
+  const child=`const fs=require('node:fs');setInterval(()=>fs.appendFileSync(${JSON.stringify(heartbeat)},'x'),20);`;
+  const parent=`require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(child)}],{stdio:'inherit'});setInterval(()=>{},1000);`;
+  try {
+    await run(process.execPath,['-e',parent],{killTree:true,timeout:1000});
+    assert.ok(fs.existsSync(heartbeat),'descendant must have started');
+    const before=fs.readFileSync(heartbeat,'utf8');
+    await new Promise(resolve=>setTimeout(resolve,100));
+    assert.equal(fs.readFileSync(heartbeat,'utf8'),before);
+  } finally {fs.rmSync(temp,{recursive:true,force:true});}
+});

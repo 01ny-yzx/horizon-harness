@@ -77,6 +77,7 @@ py -3.12 -m venv .venv
 | `/new` | 新建会话 |
 | `/search` | 配置联网搜索 |
 | `/language` | 切换界面语言 |
+| `/update` | 检查更新并升级 Horizon |
 | `/help` | 帮助与快捷键设置 |
 
 新会话使用全局默认模型，旧会话保留原来的模型。Enter 发送，Shift+Enter 换行；输入 `exit` 或按 `Ctrl+Q` 退出。

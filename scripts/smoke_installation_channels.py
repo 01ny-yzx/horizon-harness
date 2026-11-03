@@ -69,7 +69,7 @@ class InstallationChannels(unittest.TestCase):
         pack = json.loads(packed.stdout)[0]
         files = {item['path'] for item in pack['files']}
         self.assertEqual(files, {'package.json', 'LICENSE', 'README.md', 'platforms.json',
-                                 'bin/horizon.cjs', 'lib/install.cjs', 'lib/run.cjs', 'scripts/postinstall.cjs'})
+                                 'bin/horizon.cjs', 'lib/install.cjs', 'lib/run.cjs', 'lib/update.cjs', 'scripts/postinstall.cjs'})
         prefix = self.root / 'npm prefix'
         self.run_command(['npm', 'install', '--global', '--prefix', str(prefix), '--offline', '--no-audit', '--no-fund',
                           str(self.root / pack['filename'])])
@@ -81,6 +81,10 @@ class InstallationChannels(unittest.TestCase):
         self.run_command([str(executable), '--_horizon-self-test'], env=offline, cwd=cwd)
         package = prefix / 'lib' / 'node_modules' / 'horizon-harness'
         native = package / 'native' / 'horizon'
+        probe = self.root / 'probe-npm.py'
+        probe.write_text('from tui.updates import detect_installation\nprint(detect_installation().method)\n')
+        detected = self.run_command([str(executable), '--_horizon-python', str(probe)], env=offline)
+        self.assertEqual(detected.stdout.strip(), 'npm')
         before = hashlib.sha256(native.read_bytes()).hexdigest()
         (package / 'native' / 'installation.json').unlink()
         code = "require(process.argv[1]).install({root:process.argv[2],base:process.argv[3]}).catch(e=>{console.error(e.message);process.exitCode=1})"
@@ -98,6 +102,12 @@ class InstallationChannels(unittest.TestCase):
         executable = bin_dir / 'horizon'
         self.assertTrue(executable.is_symlink())
         target = executable.readlink()
+        self.assertEqual((target.parent / '.horizon-bin').read_text().strip(), str(executable))
+        probe = self.root / 'probe-curl.py'
+        probe.write_text('from tui.updates import detect_installation\nprint(detect_installation().method)\n')
+        without_install_env = {key:value for key,value in env.items() if key not in {'HORIZON_BIN_DIR', 'HORIZON_INSTALL_ROOT'}}
+        detected = self.run_command([str(executable), '--_horizon-python', str(probe)], env=without_install_env)
+        self.assertEqual(detected.stdout.strip(), 'curl')
         self.run_command([str(executable), '--version'], env=env)
         self.run_command(['/bin/sh', script], env=env)
         self.assertEqual(executable.readlink(), target)

@@ -24,9 +24,12 @@ from tui.i18n import Preferences, translate
 from tui.version import __version__
 
 
-async def run(args) -> None:
+async def run(args):
     preferences = Preferences()
     tr = lambda source: translate(source, preferences.language)
+    from tui.updates import UpdateManager
+    updater = UpdateManager(preferences.path.with_name('updates.json'))
+    app = None
     service = None
     try:
         if args.url:
@@ -39,15 +42,40 @@ async def run(args) -> None:
         async with HorizonClient(url, api_key=key, user_id=args.user, project_id=args.project,
                                  api_key_header=args.api_key_header if args.url else "X-API-Key",
                                  language=preferences.language) as client:
-            await HorizonApp(client, welcome=True, preferences=preferences,
-                             tab_scope=args.url or 'local',
-                             local_directory=service.directory if service is not None else None).run_async()
+            app = HorizonApp(client, welcome=True, preferences=preferences,
+                             tab_scope=args.url or 'local', updater=updater,
+                             local_directory=service.directory if service is not None else None)
+            await app.run_async()
     finally:
         if service is not None:
             await service.stop()
+    return (updater, app.update_requested) if app and app.update_requested else None
 
 
 def main() -> None:
+    if sys.argv[1:2] == ['upgrade']:
+        from tui.updates import UpdateManager, perform_update
+        preferences = Preferences()
+        manager = UpdateManager(preferences.path.with_name('updates.json'))
+        tr = lambda source: translate(source, preferences.language)
+        if manager.installation.method in {'source', 'unknown'}:
+            print(tr('当前从源码运行，请通过 Git 更新源码') if manager.installation.method == 'source'
+                  else tr('无法识别安装方式，请通过原安装渠道更新'))
+            return
+        try:
+            version = asyncio.run(manager.check(manual=True))
+            if not version:
+                print(tr('已是最新版本') + ' · v' + __version__)
+                return
+            print(f'Horizon {__version__} → {version} ({manager.installation.method})')
+            if input('Update and restart? [y/N] ').strip().casefold() not in {'y', 'yes'}:
+                return
+            raise SystemExit(perform_update(manager, version, []))
+        except KeyboardInterrupt:
+            return
+        except (OSError, RuntimeError) as error:
+            print(tr(str(error)), file=sys.stderr)
+            raise SystemExit(1)
     language = Preferences().language
     tr = lambda source: translate(source, language)
     parser = argparse.ArgumentParser(description=tr('Horizon terminal interface (starts a local service automatically)'))
@@ -61,7 +89,10 @@ def main() -> None:
     if args.url and args.directory is not None:
         parser.error('A directory cannot be selected with --url; the remote service owns its working directory.')
     try:
-        asyncio.run(run(args))
+        update = asyncio.run(run(args))
+        if update:
+            from tui.updates import perform_update
+            raise SystemExit(perform_update(update[0], update[1], sys.argv[1:]))
     except KeyboardInterrupt:
         pass
     except (OSError, RuntimeError, ValueError) as exc:

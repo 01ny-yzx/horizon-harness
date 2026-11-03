@@ -187,8 +187,9 @@ SelectionPicker, ConnectionForm, SearchConfigForm, HelpScreen { align: center mi
 .run-outcome { height: auto; padding-left: 4; margin-bottom: 1; text-style: none; }
 
 #composer-footer { height: 2; width: 100%; }
-#composer-hint { width: 1fr; }
-#workspace-hint { width: 40%; height: 2; padding-top: 1; content-align: right top; color: ansi_default; text-style: dim; }
+#composer-hint { width: auto; max-width: 55%; }
+#workspace-hint { width: 1fr; height: 2; padding-top: 1; content-align: left top; color: ansi_default; text-style: dim; }
+#version-hint { width: auto; max-width: 45%; height: 2; padding-top: 1; padding-left: 2; content-align: right top; color: ansi_default; text-style: dim; }
 #pending-queue { height: auto; max-height: 6; width: 100%; overflow-y: auto; }
 .queue-row { height: 1; width: 100%; }
 .queue-title { width: 1fr; height: 1; }

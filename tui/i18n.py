@@ -101,6 +101,21 @@ _TEXT = {
     'Press Enter to start ↵': ('Press Enter to start ↵', 'Enter で開始 ↵'),
 }
 _TEXT.update({
+    '模型加载中': ('Loading model', 'モデルを読み込み中'),
+    '版本更新': ('Updates', 'アップデート'),
+    '有更新': ('Update available', '更新あり'),
+    '正在检查更新…': ('Checking for updates…', '更新を確認中…'),
+    '已是最新版本': ('You are up to date', '最新バージョンです'),
+    '更新并重启': ('Update & restart', '更新して再起動'),
+    '跳过此版本': ('Skip this version', 'このバージョンをスキップ'),
+    '重试': ('Retry', '再試行'),
+    '无法保存更新设置': ('Could not save update preference', '更新設定を保存できませんでした'),
+    '无法检查更新，请检查网络后重试': ('Could not check for updates. Check your network and retry', '更新を確認できません。接続を確認して再試行してください'),
+    '当前从源码运行，请通过 Git 更新源码': ('Running from source. Update your checkout with Git', 'ソースから実行中です。Git で更新してください'),
+    '无法识别安装方式，请通过原安装渠道更新': ('Installation method unknown. Update through your original installation channel', 'インストール方法を判別できません。元の方法で更新してください'),
+    '确认后退出界面并关闭本地服务，在终端显示更新进度；成功后自动重启': ('Closes the interface and local service, shows update progress in the terminal, then restarts on success', '画面とローカルサービスを終了し、ターミナルに更新状況を表示します。完了後に再起動します'),
+})
+_TEXT.update({
     '搜索配置损坏，请重新填写 Key': ('Search settings are damaged; enter a new Key', '検索設定が破損しています。Key を入力し直してください'),
     '联网搜索': ('Web search', 'ウェブ検索'),
     '搜索 Key 与模型 Key 相互独立': ('Search and model API keys are separate', '検索とモデルの API Key は別です'),
@@ -156,7 +171,7 @@ def translate(source: str, language: str = 'en', **values) -> str:
 def help_text(language: str, shortcuts=None) -> str:
     tr = lambda text: translate(text, language)
     rows = [(' /models', '切换模型'), (' /session', '历史会话'), (' /new', '新建会话'),
-            (' /language', '界面语言'), (' /search', '联网搜索'), (' /help', '命令与快捷键')]
+            (' /language', '界面语言'), (' /search', '联网搜索'), (' /update', '版本更新'), (' /help', '命令与快捷键')]
     from tui.keybindings import KeyBindings, LABELS, display_key
     mapping = shortcuts or KeyBindings()
     lines = [f'{display_key(mapping.key(action)):<20}{tr(label)}' for action, label in LABELS.items()]

@@ -40,7 +40,17 @@ To launch from any folder using a source checkout, use absolute paths:
 
 An optional trailing directory selects another workspace. Without it, the launcher keeps the caller's current directory. This is the source-launcher route; it does not install a global `horizon` command.
 
-The current session directory is shown at the lower right. Restoring a historical conversation uses its saved directory; relative file reads, project searches, Git, and commands run against that directory. A missing saved directory fails explicitly rather than silently using Horizon's source directory.
+The current session directory appears after the model at the lower left; the Horizon version appears at the lower right. Restoring a historical conversation uses its saved directory; relative file reads, project searches, Git, and commands run against that directory. A missing saved directory fails explicitly rather than silently using Horizon's source directory.
+
+## Updates
+
+Installed releases check for stable updates once on every startup without blocking the interface. When an update is available, the version at the lower right shows “Update available ↑”. Click it or enter `/update`.
+
+Use ↑↓ and Enter to choose **Update & restart** or **Skip this version**. Skipped versions stop showing automatic notices but remain accessible through `/update`. Background check failures are silent; manual failures offer Retry.
+
+After confirmation, Horizon closes the TUI and its owned local service, displays installation progress in the terminal, and restarts on success. npm, Homebrew and curl installations retain their original installation channel. API keys, history and settings remain outside installation directories. Finish or interrupt running tasks before updating.
+
+You can also run `horizon upgrade` in the terminal. Source checkouts update through Git; unrecognized standalone installations update through their original download channel. Version 1.0.0 requires a manual upgrade first to obtain the built-in updater.
 
 ## Conversations and tabs
 

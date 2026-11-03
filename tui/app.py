@@ -37,6 +37,7 @@ from tui.keybindings import KeyBindings
 from tui.shortcut_settings import ShortcutSettings, KeyCapture
 from tui.queue_panel import PendingQueue, QueueConfirm
 from tui.workspace_hint import workspace_hint
+from tui.version import __version__
 from tui.transcript_outcomes import presentation_messages
 from tui.i18n import LANGUAGES, Preferences, help_text, translate
 
@@ -49,6 +50,11 @@ HOME_TITLE_ART = "\n".join((
     r"|_|  |_|\__,_|_|\_\___|  |_|\__| |_| |_|\__,_| .__/| .__/ \___|_| |_|___",
     r"                                            |_|   |_|",
 ))
+
+
+class VersionHint(Static):
+    async def on_click(self):
+        await self.app.action_update()
 
 
 class DirectoryHint(Static):
@@ -169,9 +175,11 @@ class HorizonApp(App):
         return color_driver(super().get_driver_class())
 
     def __init__(self, client, *, welcome: bool = False, preferences: Preferences | None = None,
-                 tab_scope: str = 'local', local_directory: str | Path | None = None) -> None:
+                 tab_scope: str = 'local', local_directory: str | Path | None = None, updater=None) -> None:
         super().__init__(ansi_color=True)
         self.client = client
+        self.updater = updater
+        self.update_requested = None
         self._local_directory = local_directory
         self._session_directories = {}
         self._queue = PendingQueue()
@@ -278,9 +286,9 @@ class HorizonApp(App):
             hint.append(text[2:])
         else:
             hint.append(self._selected_model or self.tr('未选择模型'), style='bold not dim')
-            hint.append(' · /' + self.tr(' 命令'), style='dim')
         self.query_one('#composer-hint', Static).update(hint)
         self._render_workspace_hint()
+        self._render_version_hint()
 
     def action_toggle_access(self):
         mode = 'full_access' if self._access_mode == 'read_only' else 'read_only'
@@ -363,10 +371,13 @@ class HorizonApp(App):
                             yield Static(">", id="prompt-prefix", markup=False)
                             yield self._prompt_widget
                 with Horizontal(id="composer-footer"):
-                    yield Static(self.tr("模型加载中 · / 命令"), id="composer-hint", markup=False)
+                    yield Static(self.tr("模型加载中"), id="composer-hint", markup=False)
                     yield DirectoryHint("", id="workspace-hint", markup=False)
+                    yield VersionHint(f"v{__version__}", id="version-hint", markup=False)
 
     def on_mount(self) -> None:
+        if self.updater is not None:
+            self._spawn(self._check_update())
         # Custom themes otherwise enable Textual's ANSI-to-RGB conversion,
         # which would replace the user's terminal background with a fixed shade.
         self.ansi_color = True
@@ -693,8 +704,10 @@ class HorizonApp(App):
             return
         directory = self._session_directories.get(self.session_id) if self.session_id else self._local_directory
         field = self.query_one('#workspace-hint', Static)
-        field.update(workspace_hint(directory, home=Path.home() if self._local_directory else None,
-                                    max_cells=min(48, max(0, field.content_size.width if width is None else width))))
+        available = field.content_size.width if width is None else width
+        path = workspace_hint(directory, home=Path.home() if self._local_directory else None,
+                              max_cells=max(0, available - 3))
+        field.update(Text(' · ', style='dim') + path if path.plain else Text(''))
         field.tooltip = workspace_hint(directory, max_cells=4096) if directory else None
 
     async def _refresh_pending(self):
@@ -810,7 +823,7 @@ class HorizonApp(App):
         if event.text.strip().casefold() == 'exit':
             self.exit()
             return
-        commands = {'/models': 'models', '/session': 'session', '/sessions': 'session', '/new': 'new', '/help': 'help', '/language': 'language', '/search': 'search'}
+        commands = {'/models': 'models', '/session': 'session', '/sessions': 'session', '/new': 'new', '/help': 'help', '/language': 'language', '/search': 'search', '/update': 'update'}
         if event.text in commands:
             navigates = event.text in {'/session', '/sessions', '/new'} and not self._navigation_blocked()
             if self.busy and event.text not in {'/help', '/language'} and not navigates:
@@ -847,7 +860,7 @@ class HorizonApp(App):
         rows = []
         if text.startswith('/') and '\n' not in text and text != self._command_dismissed_text:
             for name, description in (('models', '切换模型'), ('session', '历史会话'),
-                                      ('new', '新建会话'), ('help', '命令与快捷键'), ('language', '界面语言'), ('search', '联网搜索')):
+                                      ('new', '新建会话'), ('help', '命令与快捷键'), ('language', '界面语言'), ('search', '联网搜索'), ('update', '版本更新')):
                 if name.startswith(text[1:].casefold()):
                     rows.append({'id': name, 'label': f'/{name:<10} {self.tr(description)}'})
         menu = self._command_menu
@@ -892,6 +905,42 @@ class HorizonApp(App):
             await self.action_language()
         elif name == 'search':
             await self.action_search()
+        elif name == 'update':
+            await self.action_update()
+
+    async def _check_update(self):
+        await self.updater.check()
+        if not self._quitting:
+            self._render_version_hint()
+
+    def _render_version_hint(self):
+        if not self._activity_widget.is_mounted:
+            return
+        hint = Text(f'v{__version__}', style='dim', no_wrap=True, overflow='ellipsis')
+        if self.updater and self.updater.latest and self.updater.should_notify(self.updater.latest):
+            hint.append(' · ' + self.tr('有更新') + ' ↑', style=Style(color=semantic_color('warning', self._home_logo_dark), dim=False))
+        self.query_one('#version-hint', Static).update(hint)
+
+    async def action_update(self):
+        if isinstance(self.screen, ModalScreen):
+            return
+        if self.busy or self._admitting or self._navigating or self._active_tab_sessions:
+            self.notify('请先按 Esc 中断当前任务', severity='warning')
+            return
+        if self.updater is None:
+            self.notify('当前从源码运行，请通过 Git 更新源码')
+            return
+        from tui.update_dialog import UpdateDialog
+        self.push_screen(UpdateDialog(self.updater), self._update_picked)
+
+    def _update_picked(self, version):
+        self._render_version_hint()
+        if version:
+            if self.busy or self._admitting or self._active_tab_sessions:
+                self.notify('请先按 Esc 中断当前任务', severity='warning')
+                return
+            self.update_requested = version
+            self.exit()
 
     async def action_search(self):
         if self.busy or isinstance(self.screen,ModalScreen):
