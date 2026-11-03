@@ -50,16 +50,13 @@ python3 -m venv .venv
 .venv/bin/python -m tui
 ```
 
-<details>
-<summary>Windows PowerShell</summary>
+Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m tui
 ```
-
-</details>
 
 在欢迎页按 Enter 进入首页，通过 `/models` 选择模型并填写 API Key。本地服务随 TUI 自动启动和关闭。
 

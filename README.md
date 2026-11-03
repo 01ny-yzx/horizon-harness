@@ -50,16 +50,13 @@ python3 -m venv .venv
 .venv/bin/python -m tui
 ```
 
-<details>
-<summary>Windows PowerShell</summary>
+Windows PowerShell:
 
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m tui
 ```
-
-</details>
 
 Press Enter to open the home screen. Use `/models` to choose a model and enter your API Key. The local service starts and stops with the TUI.
 
