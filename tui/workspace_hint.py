@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import ntpath
+import re
 import unicodedata
 
 from rich.cells import cell_len
@@ -21,11 +23,16 @@ def workspace_hint(directory: str | Path | None, *, home: str | Path | None = No
     if not value.strip():
         return Text('')
     if home is not None:
-        home_path = str(home).rstrip('/')
-        if home_path and value == home_path:
+        home_path = str(home).rstrip('/\\')
+        windows = bool(re.match(r'^[A-Za-z]:', home_path) or '\\' in home_path or home_path.startswith('//'))
+        compared_value = ntpath.normcase(value) if windows else value
+        compared_home = ntpath.normcase(home_path) if windows else home_path
+        separator = '\\' if windows else '/'
+        if home_path and compared_value == compared_home:
             value = '~'
-        elif home_path and value.startswith(home_path + '/'):
-            value = '~' + value[len(home_path):]
+        elif home_path and compared_value.startswith(compared_home + separator):
+            suffix = value[len(home_path) + 1:]
+            value = '~/' + (suffix.replace('\\', '/') if windows else suffix)
     # A filename may contain terminal escapes, line breaks, or bidi overrides.
     # Text(...) keeps markup literal; filtering controls keeps it on one line.
     value = ''.join(char for char in value if unicodedata.category(char)[0] != 'C')

@@ -19,6 +19,13 @@ class WorkspaceHintTests(unittest.TestCase):
         self.assertEqual(self.hint('/Users/demonstration', home='/Users/demo').plain, '/Users/demonstration')
         self.assertEqual(self.hint('/Users/demo/work').plain, '/Users/demo/work')
 
+    def test_windows_home_paths_use_windows_boundaries_and_case_rules(self):
+        self.assertEqual(self.hint(r'C:\Users\demo\work\project', home=r'C:\Users\demo').plain, '~/work/project')
+        self.assertEqual(self.hint('c:/users/DEMO/work', home=r'C:\Users\demo').plain, '~/work')
+        self.assertEqual(self.hint(r'C:\Users\demo', home=r'C:\Users\demo').plain, '~')
+        self.assertEqual(self.hint(r'C:\Users\demonstration', home=r'C:\Users\demo').plain, r'C:\Users\demonstration')
+        self.assertEqual(self.hint(r'C:\Users\demo\work').plain, r'C:\Users\demo\work')
+
     def test_does_not_invent_directory_or_resolve_remote_path(self):
         for value in (None, '', '   '):
             self.assertEqual(self.hint(value).plain, '')
