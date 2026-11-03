@@ -8,7 +8,7 @@ for name in ('connection_presets.json', 'model_catalog_snapshot.json', 'model_ca
              'model_aliases.json', 'provider_endpoint_hosts.json'):
     datas.append((str(root / 'providers' / name), 'providers'))
 datas += collect_data_files('textual')
-hidden = ['api.app', 'pypdf', 'openpyxl', 'pymysql', 'bs4', 'tavily',
+hidden = ['socksio', 'api.app', 'pypdf', 'openpyxl', 'pymysql', 'bs4', 'tavily',
           'uvicorn.logging', 'uvicorn.loops.auto', 'uvicorn.protocols.http.auto',
           'uvicorn.protocols.http.h11_impl', 'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan.on']
 for package in ('tui', 'api', 'core', 'tools', 'providers', 'prompts'):

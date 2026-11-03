@@ -41,6 +41,9 @@ def main():
 
         async def verify():
             import httpx
+            # Construct the actual optional SOCKS transport without network IO.
+            async with httpx.AsyncClient(proxy='socks5h://127.0.0.1:9', trust_env=False):
+                pass
             from tui.runtime import LocalService
             from tui.client import HorizonClient
             from tui.app import HorizonApp

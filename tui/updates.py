@@ -112,7 +112,7 @@ class UpdateManager:
                     return None
                 self.latest = '.'.join(map(str,version))
                 return self.latest
-            except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+            except (httpx.HTTPError, ImportError, ValueError, TypeError, AttributeError):
                 if manual:
                     raise RuntimeError('无法检查更新，请检查网络后重试') from None
                 return None
