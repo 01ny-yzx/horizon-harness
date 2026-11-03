@@ -8,7 +8,7 @@ import tempfile
 
 
 def main():
-    original_cwd = Path.cwd()
+    original_cwd = Path.cwd().resolve()
     with tempfile.TemporaryDirectory(prefix='horizon-bundle-check-') as temp:
         root = Path(temp)
         os.environ.update(HORIZON_USER_DATA_ROOT=str(root / 'data'), LLM_PROVIDER='mock',
@@ -51,7 +51,7 @@ def main():
                     assert (await raw.get(service.url + '/session')).status_code == 401
                 async with HorizonClient(service.url, api_key=service.api_key) as client:
                     session = await client.create()
-                    assert Path(session['directory']) == original_cwd
+                    assert Path(session['directory']).samefile(original_cwd), (session['directory'], str(original_cwd))
                     assert await client.session_model(session['id']) == chosen
                     app = HorizonApp(client, local_directory=original_cwd)
                     async with app.run_test(size=(100, 30)) as pilot:
@@ -63,5 +63,5 @@ def main():
                 await service.stop()
             assert service.process.returncode is not None
         asyncio.run(verify())
-    assert Path.cwd() == original_cwd
+    assert Path.cwd().samefile(original_cwd)
     print('Horizon bundle check: PASS (resources, Python tools, local API/auth, model settings, UI, shutdown)')

@@ -2,7 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { Readable, Transform } = require('node:stream');
+const { Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { spawnSync } = require('node:child_process');
 
@@ -35,9 +35,30 @@ function command(file, args, options = {}) {
   if (result.status !== 0) throw new Error(`${path.basename(file)} failed: ${(result.stderr || '').slice(-1500)}`);
   return result.stdout;
 }
+function downloadResponse(url, signal, redirects = 5) {
+  return new Promise((resolve, reject) => {
+    const location = new URL(url);
+    if (!['http:', 'https:'].includes(location.protocol)) return reject(new Error('Unsupported download protocol'));
+    const transport = require(location.protocol === 'https:' ? 'node:https' : 'node:http');
+    transport.get(location, {signal, headers:{'User-Agent':'horizon-installer', 'Accept-Encoding':'identity'}}, response => {
+      response.on('error', reject);
+      if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
+        response.resume();
+        if (!redirects || !response.headers.location) return reject(new Error('Invalid or excessive download redirects'));
+        let next;
+        try { next = new URL(response.headers.location, location); }
+        catch { return reject(new Error('Invalid download redirect URL')); }
+        if (location.protocol === 'https:' && next.protocol !== 'https:') return reject(new Error('Insecure download redirect'));
+        downloadResponse(next.href, signal, redirects - 1).then(resolve, reject);
+      } else if (response.statusCode !== 200) {
+        response.resume();
+        reject(new Error(`Download failed (${response.statusCode}). Horizon release assets may not be published yet.`));
+      } else resolve(response);
+    }).on('error', reject);
+  });
+}
 async function download(url, file) {
-  const response = await fetch(url, {signal:AbortSignal.timeout(120000)});
-  if (!response.ok) throw new Error(`Download failed (${response.status}). Horizon release assets may not be published yet.`);
+  const response = await downloadResponse(url, AbortSignal.timeout(120000));
   const hash = crypto.createHash('sha256');
   let bytes = 0;
   const check = new Transform({transform(chunk, encoding, done) {
@@ -45,7 +66,7 @@ async function download(url, file) {
     if (bytes > 512 * 1024 * 1024) return done(new Error('Horizon download exceeds size limit'));
     hash.update(chunk); done(null, chunk);
   }});
-  await pipeline(Readable.fromWeb(response.body), check, fs.createWriteStream(file, {mode:0o600}));
+  await pipeline(response, check, fs.createWriteStream(file, {mode:0o600}));
   return hash.digest('hex');
 }
 function executableAt(root, target) {
@@ -130,4 +151,4 @@ async function install(options = {}) {
   }
   } finally { release(); }
 }
-module.exports = {targetFor, validateManifest, safeEntries, acquireLock, install};
+module.exports = {targetFor, validateManifest, safeEntries, acquireLock, download, install};
