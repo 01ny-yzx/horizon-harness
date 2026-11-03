@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from config.settings import settings
+from core.python_runtime import python_command
+from core.external_process import run_external
 from core.command_execution_context import get_host_command_context
 from core.path_grounding import (
     PathContext,
@@ -126,7 +128,7 @@ class SandboxManager:
             return self._err("Working directory is not a directory.", "cwd_not_directory", base_data)
 
         try:
-            completed = subprocess.run(
+            completed = run_external(
                 command,
                 cwd=str(run_cwd),
                 shell=True,
@@ -172,7 +174,7 @@ class SandboxManager:
         script = host.sandbox_dir / f"snippet_{uuid.uuid4().hex}.py"
         script.write_text(code, encoding="utf-8")
         try:
-            return self._run_argv([sys.executable, str(script)], timeout=timeout)
+            return self._run_argv(python_command(str(script)), timeout=timeout)
         finally:
             script.unlink(missing_ok=True)
 
@@ -192,7 +194,7 @@ class SandboxManager:
             return self._err(f"Python file does not exist: {path}", "file_not_found")
         if source.suffix.lower() != ".py":
             return self._err("Only .py files can be run.", "unsupported_file")
-        return self._run_argv([sys.executable, str(source)], timeout=timeout)
+        return self._run_argv(python_command(str(source)), timeout=timeout)
 
     def _run_argv(self, argv: list[str], *, timeout: int) -> dict[str, Any]:
         host = get_host_command_context()
@@ -301,7 +303,8 @@ class SandboxManager:
         for key, value in os.environ.items():
             if ("KEY" in key or "TOKEN" in key or "SECRET" in key) and value and len(value) >= 8:
                 result = result.replace(value, "[REDACTED]")
-        return result
+        from core.private_configuration import redact_connection_secrets
+        return redact_connection_secrets(result)
 
     @staticmethod
     def _host_env(sandbox_dir: Path, project_root: Path) -> dict[str, str]:

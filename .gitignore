@@ -88,3 +88,14 @@ exports/
 
 .horizon_runtime_validation/
 .horizon-step6-data/
+
+# Private local exports are not release inputs.
+/outputs/
+/build/
+/docs/superpowers/
+.pytest_cache/
+
+# Approved public README screenshots only.
+!docs/assets/home.png
+!docs/assets/welcome.png
+!docs/assets/conversation.png

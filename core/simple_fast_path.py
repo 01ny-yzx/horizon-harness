@@ -8,14 +8,14 @@ from typing import Any
 from core.runtime_lane import RuntimeLane, RuntimeLaneDecision
 from core.structured_intent_access import structured_task_profile
 from core.unicode_safety import sanitize_unicode
+from prompts.agent_prompt import build_agent_policy
 
 
 SIMPLE_CHAT_SYSTEM_PROMPT = (
-    "You are Horizon Runtime in simple chat mode.\n"
-    "Answer the user directly and concisely.\n"
-    "No tools are available in this mode.\n"
-    "Do not claim that you read files, executed commands, browsed the web, or used tools.\n"
-    "If the request requires tools, say that it requires the full agent path."
+    build_agent_policy() + "\n\n"
+    "No tools are available in this mode. Answer directly without claiming tool actions. "
+    "If current external information is required, say it cannot be verified in this turn; "
+    "do not turn stored knowledge into purported web research."
 )
 
 

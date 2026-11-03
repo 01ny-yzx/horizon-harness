@@ -31,7 +31,7 @@ def test_provider_candidates_and_limits() -> None:
     assert shared.provider_id == "" and len(shared.candidate_model_ids) == 2
     assert shared.max_context_tokens == 1_000_000 and shared.max_output_tokens == 131_072
 
-    ambiguous = resolve_model_limit("openai_compatible", "glm-5", base_url="https://opencode.ai/v1")
+    ambiguous = resolve_model_limit("openai_compatible", "minimax-m3", base_url="https://opencode.ai/v1")
     assert ambiguous.ambiguous and ambiguous.resolution_reason == "ambiguous_provider_model"
     assert ambiguous.max_context_tokens is None and ambiguous.max_output_tokens is None
 

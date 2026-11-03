@@ -33,6 +33,7 @@ def chat(request: ChatRequest) -> ChatResponse:
             delivery=request.delivery,
             message_id=request.message_id,
             resume=request.resume,
+            access_mode=request.access_mode,
         )
         return ChatResponse(
             success=True,
@@ -44,7 +45,7 @@ def chat(request: ChatRequest) -> ChatResponse:
             admitted_seq=admitted.admitted_seq,
             delivery=admitted.delivery,
             trace_id=None,
-            remaining=int(quota.get("remaining", 0)),
+            remaining=None,
             rate_limit=quota,
         )
     except HTTPException:

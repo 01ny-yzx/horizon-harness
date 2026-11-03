@@ -7,6 +7,9 @@ from types import MappingProxyType
 from typing import Any
 
 from core.session_event import DurableSessionEvent
+from core.session_model import MODEL_SELECTED, project_model_selected
+from core.session_title import TITLE_UPDATED, project_title_updated
+from core.session_run_status import RUN_FINISHED, project_run_finished
 from core.session_message_updater import (
     COMPACTION_ENDED,
     PROMPTED,
@@ -15,6 +18,8 @@ from core.session_message_updater import (
 )
 from core.session_input import (
     PROMPT_ADMITTED,
+    INPUT_CONTROLLED,
+    project_input_controlled,
     project_prompt_admitted_event,
     project_session_input_prompted,
 )
@@ -109,12 +114,16 @@ def project_compaction_started_event(
 SESSION_EVENT_PROJECTORS = MappingProxyType(
     {
         SESSION_CREATED: project_session_event,
+        MODEL_SELECTED: project_model_selected,
+        TITLE_UPDATED: project_title_updated,
+        RUN_FINISHED: project_run_finished,
         **{
             event_type: project_session_message_event
             for event_type in SESSION_MESSAGE_EVENT_TYPES
             if event_type != PROMPTED
         },
         PROMPT_ADMITTED: project_prompt_admitted_event,
+        INPUT_CONTROLLED: project_input_controlled,
         PROMPTED: project_prompted_event,
         COMPACTION_STARTED: project_compaction_started_event,
     }

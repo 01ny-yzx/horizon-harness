@@ -1,0 +1,83 @@
+name: Native terminal bundles
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: macos-arm64
+          - runner: macos-15-intel
+            target: macos-x64
+          - runner: windows-2022
+            target: windows-x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      EMBEDDING_ENABLED: 'false'
+      MCP_ENABLED: 'false'
+      WEB_SEARCH_PROVIDER: disabled
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -r requirements-build.txt
+      - run: python -m unittest scripts.smoke_bundle_entry -q
+      - run: python scripts/build_bundle.py
+      - run: python scripts/prepare_installers.py
+      - run: node --test distribution/tests/npm.test.cjs
+      - run: python -m unittest scripts.smoke_prepare_installers -q
+      - run: python scripts/smoke_native_download.py
+      - if: matrix.target == 'macos-arm64'
+        run: python -m unittest scripts.smoke_installation_channels -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: horizon-${{ matrix.target }}
+          path: |
+            dist/bundles/horizon-*.tar.gz
+            dist/bundles/horizon-*.zip
+            dist/bundles/horizon-*.sha256
+            dist/bundles/horizon-*.build.json
+          if-no-files-found: error
+
+  prepare-installers:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: horizon-*
+          path: dist/bundles
+          merge-multiple: true
+      - run: python scripts/prepare_installers.py --require-target macos-arm64 --require-target macos-x64 --require-target windows-x64
+      - run: npm pack ./dist/distribution/npm --pack-destination ./dist/distribution
+      - run: python scripts/build_source.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: horizon-installation-channels
+          path: |
+            dist/distribution/*.json
+            dist/distribution/*.sh
+            dist/distribution/*.tgz
+            dist/distribution/Formula/*.rb
+            dist/horizon-*-source.zip
+          if-no-files-found: error

@@ -10,11 +10,20 @@ from typing import Callable
 Drain = Callable[[str, bool, threading.Event], None]
 
 
+class SessionInactiveError(RuntimeError):
+    """Steering requires an active, non-stopping execution."""
+
+
+class SessionBusyError(RuntimeError):
+    """A configuration change cannot race a running session."""
+
+
 @dataclass
 class _Entry:
     done: threading.Event = field(default_factory=threading.Event)
     cancelled: threading.Event = field(default_factory=threading.Event)
     pending_wake: bool = False
+    restart_on_failure: bool = False
     stopping: bool = False
     error: BaseException | None = None
 
@@ -31,12 +40,26 @@ class SessionRunCoordinator:
         with self._lock:
             return set(self._entries)
 
-    def wake(self, session_id: str) -> None:
+    def configure_idle(self, session_id: str, update: Callable):
+        with self._lock:
+            if str(session_id) in self._entries:
+                raise SessionBusyError('任务正在执行，请先中断再切换模型')
+            return update()
+
+    def configure_active(self, session_id: str, update: Callable):
+        with self._lock:
+            entry = self._entries.get(str(session_id))
+            if entry is None or entry.stopping or entry.error is not None or entry.done.is_set():
+                raise SessionInactiveError('当前没有正在执行的任务，消息将继续排队')
+            return update()
+
+    def wake(self, session_id: str, *, restart_on_failure: bool = True) -> None:
         key = str(session_id)
         with self._lock:
             entry = self._entries.get(key)
             if entry is not None:
                 entry.pending_wake = True
+                entry.restart_on_failure |= restart_on_failure
                 return
             entry = _Entry()
             self._entries[key] = entry
@@ -104,9 +127,13 @@ class SessionRunCoordinator:
         with self._lock:
             if entry.error is None and not entry.stopping and entry.pending_wake:
                 entry.pending_wake = False
+                entry.restart_on_failure = False
                 return True
 
-            successor = _Entry() if entry.pending_wake else None
+            restart = entry.pending_wake and (
+                entry.restart_on_failure or (entry.error is None and not entry.stopping)
+            )
+            successor = _Entry() if restart else None
             if self._entries.get(key) is entry:
                 if successor is None:
                     self._entries.pop(key, None)

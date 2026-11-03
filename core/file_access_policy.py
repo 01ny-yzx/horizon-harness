@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict, dataclass
+from core.working_directory import get_working_directory
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import unquote
@@ -48,7 +49,7 @@ class FileAccessPolicy:
     """Classify and gate local file reads/writes."""
 
     def __init__(self, project_root: Path | None = None) -> None:
-        self.project_root = (project_root or PROJECT_ROOT).resolve()
+        self.project_root = (project_root or get_working_directory()).resolve()
 
     def evaluate(
         self,

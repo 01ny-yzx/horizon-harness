@@ -10,9 +10,14 @@ from core.database import DatabaseService, get_database_service
 from core.session_input import SessionInput, SessionInputService
 from core.session_message_updater import TOOL_FAILED
 from core.session_store import SessionStore
+from core.agent_access_policy import access_mode_scope
 
 
-RunWorkItem = Callable[[str, str | None, threading.Event], None]
+RunWorkItem = Callable[[str, str | None, threading.Event], str | None]
+
+
+class SessionWorkItemFailed(RuntimeError):
+    """A normally returned task failure must stop the remaining queue."""
 
 
 class SessionRunner:
@@ -48,20 +53,32 @@ class SessionRunner:
             queues = [] if steers else self.inputs.pending(session_id, "queue")
             if steers:
                 primary = steers[-1]
+                if not self.inputs.claim_input(session_id, primary.id):
+                    continue
                 promotion: str | None = "steer"
             elif queues:
-                primary = queues[0]
+                primary = self.inputs.claim_next_queued(session_id)
+                if primary is None:
+                    continue
                 promotion = "queue"
             elif should_force:
                 primary = self._latest_visible_user(session_id)
                 promotion = None
             else:
                 break
-            self.run_work_item(
-                primary.prompt["text"] if primary is not None else "",
-                promotion,
-                cancelled,
-            )
+            try:
+                mode = self.inputs.access_mode(primary.id) if primary is not None else None
+                with access_mode_scope(mode):
+                    outcome = self.run_work_item(
+                        primary.prompt["text"] if primary is not None else "",
+                        promotion,
+                        cancelled,
+                    )
+                    if outcome == 'failed':
+                        raise SessionWorkItemFailed('Session work item failed')
+            finally:
+                if promotion is not None and primary is not None:
+                    self.inputs.release_claim(primary.id)
             should_force = False
 
     def fail_interrupted_tools(self, session_id: str) -> int:
@@ -116,4 +133,4 @@ class SessionRunner:
         return None
 
 
-__all__ = ["RunWorkItem", "SessionRunner"]
+__all__ = ["RunWorkItem", "SessionRunner", "SessionWorkItemFailed"]

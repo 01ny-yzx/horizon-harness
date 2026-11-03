@@ -9,6 +9,7 @@ from typing import Any
 from core.agent_access_policy import get_agent_access_mode
 from core.finalization_context_snapshot import FinalizationContextSnapshot
 from core.unicode_safety import sanitize_unicode
+from prompts.agent_prompt import build_agent_policy, tool_guidance
 
 REMOVED_CONTINUATION_RUNTIME_SECTIONS = (
     "available_tool_names",
@@ -54,7 +55,7 @@ def build_initial_agent_turn_pack(
 
     mode = get_agent_access_mode(access_mode)
     system = (
-        "You are Horizon Runtime's agent.\n"
+        build_agent_policy() + "\n\n" + tool_guidance(tools) + "\n"
         + _agent_tool_constraints(mode)
         + "\nAnswer directly when no tool is needed. Otherwise use the supplied structured tools as needed. "
         "After tool results, continue from the actual observations."
@@ -146,7 +147,7 @@ def build_agent_continuation_pack(
     mode = get_agent_access_mode(access_mode)
     tool_names = [_schema_tool_name(tool) for tool in tools]
     system = (
-        "You are Horizon Runtime's agent.\n"
+        build_agent_policy() + "\n\n" + tool_guidance(tools) + "\n"
         + _agent_tool_constraints(mode)
         + "\nUse the supplied structured tools when needed. "
         "Treat ToolObservations as the actual results of previous tool calls. "
@@ -256,6 +257,7 @@ def build_agent_terminal_synthesis_pack(
     """Build the isolated tools-disabled continuation synthesis pack."""
 
     system = (
+        build_agent_policy() + "\n\n"
         "You are Horizon Runtime's isolated terminal synthesis turn.\n"
         "All tool execution has ended and tools are disabled.\n"
         "Answer only from the supplied current-request finalization context.\n"
@@ -278,11 +280,12 @@ def build_final_responder_pack(
     """Build the isolated tools-disabled terminal responder pack."""
 
     system = (
+        build_agent_policy() + "\n\n"
         "You are Horizon Runtime's isolated terminal responder.\n"
         "All tool execution has ended and tools are disabled.\n"
         "Final responder response contract:\n"
         "Answer only from the supplied current-request finalization context.\n"
-        "Summarize every independent success and every failed or blocked result.\n"
+        "Summarize user-relevant outcomes, including material failures or blocked results; omit routine internal steps.\n"
         "A non-zero command exit is a failure, not a success.\n"
         "Do not request, promise, describe, or emit another ToolCall.\n"
         "Do not invent missing results or expose runtime, trace, planner, schema, or internal identities.\n"
@@ -349,6 +352,7 @@ def build_single_file_read_final_answer_pack(
 
     observation_payload = single_file_read_observation_payload(read_observation)
     system = (
+        build_agent_policy() + "\n\n"
         "You are the final-answer stage for a completed single-file read task.\n"
         "Tools are disabled.\n"
         "Respond in the same language as the current user request, unless the user explicitly requests a different language.\n"
@@ -436,7 +440,7 @@ def _agent_tool_constraints(access_mode: str) -> str:
         _access_mode_instruction(access_mode)
         + "The tools supplied to this turn are real structured tools. Use only them and match their schemas. "
         "Prefer a dedicated tool over sandbox_exec. "
-        "Use an explicit absolute path, or a project-relative path only for the opened project; ask when an existing file location is unknown. "
+        "Use an explicit absolute path, or a project-relative path only for the opened project; use available read/search tools to resolve an existing file location, and ask only if it remains ambiguous. "
         "The Runtime may choose its default output directory when none is supplied. "
         "Never claim tool success without a ToolObservation, and never simulate ToolCalls with XML, JSON, or prose. "
         "Use side effects only when the request needs them. Runtime enforces authorization and safety. "

@@ -7,9 +7,11 @@ import platform
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path, PureWindowsPath
+from core.agent_access_policy import get_agent_access_mode
 from typing import Any
 
 from config.settings import PROJECT_ROOT, settings
+from core.working_directory import get_working_directory
 
 
 DESKTOP_ALIASES = {"desktop", "桌面"}
@@ -84,7 +86,7 @@ def build_path_context(
     user = _safe_id(user_id or settings.default_user_id)
     project = _safe_id(project_id or settings.default_project_id)
     app = (app_root or PROJECT_ROOT).expanduser().resolve()
-    opened_project = (project_root or PROJECT_ROOT).expanduser().resolve()
+    opened_project = (project_root or get_working_directory()).expanduser().resolve()
     data_root = (user_data_root or _default_user_data_root()).expanduser().resolve()
     workspace_root = (data_root / "workspace_store").resolve()
     workspace_dir = (workspace_root / user / project).resolve()
@@ -100,7 +102,7 @@ def build_path_context(
         default_output_dir=default_output_dir,
         process_cwd=Path.cwd().resolve(),
         user_home=Path.home().resolve(),
-        access_mode=str(os.getenv("AGENT_ACCESS_MODE", settings.agent_access_mode) or ""),
+        access_mode=get_agent_access_mode(),
         runtime_lane=str(runtime_lane or ""),
         user_id=user,
         project_id=project,

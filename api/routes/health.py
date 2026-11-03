@@ -8,6 +8,7 @@ from fastapi import APIRouter
 
 from api.schemas import ApiResponse
 from config.settings import settings
+from core.agent_access_policy import get_agent_access_mode
 from core.embedding_provider import EmbeddingProvider
 from core.mcp_config import load_mcp_server_configs_from_sources
 from providers.capabilities import reasoning_auto_policy
@@ -84,6 +85,7 @@ def status() -> ApiResponse:
         success=True,
         data={
             "llm": llm_status,
+            "access_mode": get_agent_access_mode(),
             "deepseek_configured": bool(settings.llm_api_key or settings.deepseek_api_key),
             "deepseek_model": settings.deepseek_model,
             "tavily_configured": bool(os.getenv("TAVILY_API_KEY", "").strip()),

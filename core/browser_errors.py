@@ -151,7 +151,7 @@ FRIENDLY_TEXT = {
     ),
     BrowserErrorCode.PLAYWRIGHT_MISSING: (
         "浏览器依赖 Playwright 未安装。",
-        "请在当前虚拟环境中运行：python -m pip install -r requirements.txt",
+        "请在当前虚拟环境中运行：python -m pip install -r requirements-browser.txt",
         "dependency",
         False,
     ),

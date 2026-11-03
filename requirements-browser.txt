@@ -1,0 +1,3 @@
+# Optional browser automation; core TUI does not require Playwright.
+-r requirements.txt
+playwright>=1.60.0,<2

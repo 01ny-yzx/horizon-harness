@@ -16,6 +16,7 @@ from core.session_message_updater import PROMPTED
 from core.unicode_safety import sanitize_unicode
 
 
+INPUT_CONTROLLED = "session.next.input.controlled"
 PROMPT_ADMITTED = "session.next.prompt.admitted"
 SESSION_INPUT_DELIVERIES = frozenset({"steer", "queue"})
 
@@ -69,7 +70,12 @@ class SessionInputService:
         prompt: dict[str, Any] | str,
         delivery: str = "steer",
         message_id: str | None = None,
+        access_mode: str | None = None,
     ) -> AdmittedSessionInput:
+        from core.agent_access_policy import AGENT_ACCESS_MODES, get_agent_access_mode
+        if access_mode is not None and access_mode not in AGENT_ACCESS_MODES:
+            raise ValueError('Invalid access mode')
+        selected_mode = get_agent_access_mode() if access_mode is None else access_mode
         identifier = _message_id(message_id)
         expected_prompt = canonical_prompt(prompt)
         expected_delivery = canonical_delivery(delivery)
@@ -80,6 +86,7 @@ class SessionInputService:
         }
         existing = self.find(identifier)
         if existing is not None:
+            self._check_access_mode(identifier, selected_mode)
             return _equivalent_or_conflict(existing, expected)
 
         created = int(time.time() * 1000)
@@ -93,12 +100,14 @@ class SessionInputService:
                     "prompt": expected_prompt,
                     "delivery": expected_delivery,
                     "timestamp": created,
+                    "access_mode": selected_mode,
                 },
                 time_created=created,
             )
         except Exception as exc:
             recorded = self.find(identifier)
             if recorded is not None:
+                self._check_access_mode(identifier, selected_mode)
                 return _equivalent_or_conflict(recorded, expected)
             if isinstance(exc, SessionInputLifecycleConflict):
                 raise SessionPromptConflictError(
@@ -108,78 +117,105 @@ class SessionInputService:
         recorded = self.find(identifier)
         if recorded is None:
             raise RuntimeError("PromptAdmitted committed without a session_input projection")
+        self._check_access_mode(identifier, selected_mode)
         return _equivalent_or_conflict(recorded, expected)
 
-    def has_pending(self, session_id: str, delivery: str) -> bool:
-        selected_delivery = canonical_delivery(delivery)
+    def access_mode(self, message_id: str) -> str | None:
         with self.database.read_transaction() as connection:
-            row = connection.execute(
-                """
-                SELECT id FROM session_input
-                WHERE session_id = ? AND promoted_seq IS NULL AND delivery = ?
-                LIMIT 1
-                """,
-                (str(session_id), selected_delivery),
-            ).fetchone()
-        return row is not None
+            row = connection.execute('''
+                SELECT e.data FROM session_input i JOIN event e
+                ON e.aggregate_id = i.session_id AND e.seq = i.admitted_seq
+                WHERE i.id = ?
+            ''', (message_id,)).fetchone()
+        mode = json.loads(row['data']).get('access_mode') if row else None
+        return mode if mode in {'read_only', 'full_access'} else None
 
-    def pending(self, session_id: str, delivery: str) -> list[SessionInput]:
-        selected_delivery = canonical_delivery(delivery)
+    def _check_access_mode(self, message_id: str, mode: str):
+        stored = self.access_mode(message_id)
+        if stored is not None and stored != mode:
+            raise SessionPromptConflictError(f'PromptConflict for message_id: {message_id}')
+
+    def pending_all(self, session_id: str, *, unclaimed: bool = False) -> list[SessionInput]:
+        """Read all effective deliveries in one consistent display snapshot."""
         with self.database.read_transaction() as connection:
-            rows = connection.execute(
-                """
-                SELECT id, session_id, prompt, delivery, admitted_seq,
-                       promoted_seq, time_created
-                FROM session_input
-                WHERE session_id = ? AND promoted_seq IS NULL AND delivery = ?
-                ORDER BY admitted_seq ASC
-                """,
-                (str(session_id), selected_delivery),
-            ).fetchall()
+            rows = connection.execute(_PENDING_SELECT + """
+                WHERE i.session_id = ? AND i.promoted_seq IS NULL
+                  AND COALESCE(c.action, '') != 'recall'
+                  AND (? = 0 OR COALESCE(c.claimed, 0) = 0)
+                ORDER BY i.admitted_seq
+            """, (str(session_id), int(unclaimed))).fetchall()
         return [_from_row(row) for row in rows]
 
+    def pending(self, session_id: str, delivery: str, *, unclaimed: bool = False) -> list[SessionInput]:
+        selected = canonical_delivery(delivery)
+        return [item for item in self.pending_all(session_id, unclaimed=unclaimed)
+                if item.delivery == selected]
+
+    def has_pending(self, session_id: str, delivery: str) -> bool:
+        return bool(self.pending(session_id, delivery))
+
+    def recall(self, session_id: str, message_id: str) -> SessionInput:
+        return self._control(session_id, message_id, 'recall')
+
+    def steer(self, session_id: str, message_id: str) -> SessionInput:
+        return self._control(session_id, message_id, 'steer')
+
+    def _control(self, session_id: str, message_id: str, action: str) -> SessionInput:
+        stored = self.find(message_id)
+        if stored is None or stored.session_id != session_id:
+            raise KeyError(message_id)
+        try:
+            self.events.publish(aggregate_id=session_id, event_type=INPUT_CONTROLLED,
+                data={'session_id': session_id, 'message_id': message_id, 'action': action})
+        except _AlreadyControlled:
+            pass
+        return stored
+
+    def claim_next_queued(self, session_id: str) -> SessionInput | None:
+        # Claim before choosing text/access mode. Controls and promotion serialize
+        # against the same SQLite writer, so no stale recalled text can execute.
+        with self.database.write_transaction() as connection:
+            row = connection.execute(_PENDING_SELECT + """
+                WHERE i.session_id = ? AND i.promoted_seq IS NULL
+                  AND COALESCE(c.action, '') NOT IN ('recall', 'steer')
+                  AND i.delivery = 'queue' ORDER BY i.admitted_seq LIMIT 1
+            """, (session_id,)).fetchone()
+            if row is None:
+                return None
+            connection.execute("""INSERT INTO session_input_control(message_id, claimed)
+                VALUES (?, 1) ON CONFLICT(message_id) DO UPDATE SET claimed = 1""", (row['id'],))
+            return _from_row(row)
+
+    def claim_input(self, session_id: str, message_id: str) -> bool:
+        with self.database.write_transaction() as connection:
+            row = connection.execute("""SELECT i.id FROM session_input i
+                LEFT JOIN session_input_control c ON c.message_id = i.id
+                WHERE i.session_id = ? AND i.id = ? AND i.promoted_seq IS NULL
+                  AND COALESCE(c.action, '') != 'recall'""", (session_id, message_id)).fetchone()
+            if row is None:
+                return False
+            connection.execute("""INSERT INTO session_input_control(message_id, claimed)
+                VALUES (?, 1) ON CONFLICT(message_id) DO UPDATE SET claimed = 1""", (message_id,))
+            return True
+
+    def release_claim(self, message_id: str) -> None:
+        with self.database.write_transaction() as connection:
+            connection.execute('UPDATE session_input_control SET claimed = 0 WHERE message_id = ?', (message_id,))
+
     def promote_steers(self, session_id: str, cutoff: int) -> int:
-        with self.database.read_transaction() as connection:
-            rows = connection.execute(
-                """
-                SELECT id, session_id, prompt, delivery, admitted_seq,
-                       promoted_seq, time_created
-                FROM session_input
-                WHERE session_id = ?
-                  AND promoted_seq IS NULL
-                  AND delivery = 'steer'
-                  AND admitted_seq <= ?
-                ORDER BY admitted_seq ASC
-                """,
-                (str(session_id), int(cutoff)),
-            ).fetchall()
-        inputs = [_from_row(row) for row in rows]
-        for admitted in inputs:
-            self._publish_prompted(admitted)
-        return len(inputs)
+        return sum(self._publish_prompted(item) for item in self.pending(session_id, 'steer')
+                   if item.admitted_seq <= int(cutoff))
 
     def promote_next_queued(self, session_id: str) -> bool:
-        with self.database.read_transaction() as connection:
-            row = connection.execute(
-                """
-                SELECT id, session_id, prompt, delivery, admitted_seq,
-                       promoted_seq, time_created
-                FROM session_input
-                WHERE session_id = ?
-                  AND promoted_seq IS NULL
-                  AND delivery = 'queue'
-                ORDER BY admitted_seq ASC
-                LIMIT 1
-                """,
-                (str(session_id),),
-            ).fetchone()
-        if row is None:
-            return False
-        admitted = _from_row(row)
-        self._publish_prompted(admitted)
-        return True
+        # Retry if a control wins between selecting and publishing.
+        while True:
+            queued = self.pending(session_id, 'queue')
+            if not queued:
+                return False
+            if self._publish_prompted(queued[0]):
+                return True
 
-    def _publish_prompted(self, admitted: SessionInput) -> None:
+    def _publish_prompted(self, admitted: SessionInput) -> bool:
         try:
             self.events.publish(
                 aggregate_id=admitted.session_id,
@@ -197,10 +233,56 @@ class SessionInputService:
             if (
                 stored is not None
                 and stored.promoted_seq is not None
-                and projection_equivalent(stored, admitted)
+                and stored.session_id == admitted.session_id
+                and stored.prompt == admitted.prompt
+                and stored.time_created == admitted.time_created
             ):
-                return
+                return False
+            if stored is not None and stored.promoted_seq is None:
+                with self.database.read_transaction() as connection:
+                    control = connection.execute(
+                        'SELECT action FROM session_input_control WHERE message_id = ?',
+                        (admitted.id,),
+                    ).fetchone()
+                if control is not None and (
+                    control['action'] == 'recall'
+                    or (control['action'] == 'steer' and admitted.delivery == 'queue')
+                ):
+                    return False
             raise exc
+        return True
+
+
+_PENDING_SELECT = """
+    SELECT i.id, i.session_id, i.prompt,
+           CASE WHEN c.action = 'steer' THEN 'steer' ELSE i.delivery END AS delivery,
+           i.admitted_seq, i.promoted_seq, i.time_created
+    FROM session_input i LEFT JOIN session_input_control c ON c.message_id = i.id
+"""
+
+
+class _AlreadyControlled(RuntimeError):
+    pass
+
+
+def project_input_controlled(connection: sqlite3.Connection, event: DurableSessionEvent) -> None:
+    session_id, message_id = _event_identity(event)
+    action = event.data.get('action')
+    if action not in {'steer', 'recall'}:
+        raise ValueError('Invalid queue control')
+    row = _find_row(connection, message_id)
+    control = connection.execute('SELECT * FROM session_input_control WHERE message_id = ?', (message_id,)).fetchone()
+    if row is None or row['session_id'] != session_id:
+        raise KeyError(message_id)
+    if row['promoted_seq'] is not None or (control and control['claimed']):
+        raise SessionInputLifecycleConflict(message_id)
+    if control and control['action'] == action:
+        raise _AlreadyControlled(message_id)
+    if row['delivery'] != 'queue' or (control and control['action'] in {'recall', 'steer'}):
+        raise SessionInputLifecycleConflict(message_id)
+    connection.execute("""INSERT INTO session_input_control(message_id, action, control_seq)
+        VALUES (?, ?, ?) ON CONFLICT(message_id) DO UPDATE SET
+        action = excluded.action, control_seq = excluded.control_seq""", (message_id, action, event.seq))
 
 
 def canonical_prompt(prompt: dict[str, Any] | str) -> dict[str, str]:
@@ -305,6 +387,15 @@ def project_session_input_prompted(
     expected_prompt = prompt_from_event(event)
     expected_delivery = delivery_from_event(event)
     expected_time = timestamp_from_event(event)
+    control = connection.execute('SELECT action FROM session_input_control WHERE message_id = ?', (message_id,)).fetchone()
+    if control is not None and control['action'] == 'recall':
+        raise SessionInputLifecycleConflict(message_id)
+    original = _find_row(connection, message_id)
+    effective_delivery = 'steer' if control is not None and control['action'] == 'steer' else (original['delivery'] if original else expected_delivery)
+    if effective_delivery != expected_delivery:
+        raise SessionInputLifecycleConflict(message_id)
+    # Keep immutable admission delivery; validate Prompted against effective delivery.
+    projection_delivery = original['delivery'] if original else expected_delivery
     cursor = connection.execute(
         """
         UPDATE session_input
@@ -319,7 +410,7 @@ def project_session_input_prompted(
             stored,
             session_id=session_id,
             prompt=expected_prompt,
-            delivery=expected_delivery,
+            delivery=projection_delivery,
             time_created=expected_time,
         ):
             raise SessionInputLifecycleConflict(message_id)
@@ -334,7 +425,7 @@ def project_session_input_prompted(
                 stored,
                 session_id=session_id,
                 prompt=expected_prompt,
-                delivery=expected_delivery,
+                delivery=projection_delivery,
                 time_created=expected_time,
             )
         ):
@@ -460,6 +551,7 @@ def _prompt_json(prompt: dict[str, Any]) -> str:
 __all__ = [
     "AdmittedSessionInput",
     "PROMPT_ADMITTED",
+    "INPUT_CONTROLLED",
     "PromptConflictError",
     "SESSION_INPUT_DELIVERIES",
     "SessionInput",
@@ -471,6 +563,7 @@ __all__ = [
     "delivery_from_event",
     "equivalent",
     "project_prompt_admitted_event",
+    "project_input_controlled",
     "project_session_input_prompted",
     "prompt_from_event",
     "timestamp_from_event",

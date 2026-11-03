@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+from core.external_process import run_external
+from core.working_directory import get_working_directory
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +23,7 @@ INIT_SUGGESTION = "Run: python scripts/init_git_repo.py"
 def git_is_repo() -> dict[str, Any]:
     """Check whether the current directory is inside a Git work tree."""
 
-    cwd = os.getcwd()
+    cwd = str(get_working_directory())
     result = _run_git(["rev-parse", "--is-inside-work-tree"])
     if result["returncode"] != 0:
         return {
@@ -266,9 +268,10 @@ def _run_git(args: list[str]) -> dict[str, Any]:
     """Run a git command safely."""
 
     try:
-        completed = subprocess.run(
+        completed = run_external(
             ["git", *args],
             shell=False,
+            cwd=get_working_directory(),
             capture_output=True,
             text=True,
             timeout=30,
@@ -307,7 +310,7 @@ def _require_repo() -> dict[str, Any]:
             "error": "Current directory is not a Git repository.",
             "data": {"suggestion": INIT_SUGGESTION},
         }
-    return {"success": True, "data": {"repo_root": str(root), "cwd": os.getcwd()}}
+    return {"success": True, "data": {"repo_root": str(root), "cwd": str(get_working_directory())}}
 
 
 def _safe_repo_path(file_path: str) -> dict[str, Any]:
@@ -323,7 +326,7 @@ def _safe_repo_path(file_path: str) -> dict[str, Any]:
 
     candidate = Path(file_path).expanduser()
     if not candidate.is_absolute():
-        candidate = Path(os.getcwd()) / candidate
+        candidate = Path(str(get_working_directory())) / candidate
     resolved = candidate.resolve()
 
     try:

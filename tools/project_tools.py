@@ -5,6 +5,8 @@ from __future__ import annotations
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
+from core.private_configuration import is_private_connection_path
+from core.working_directory import resolve_working_path
 
 
 IGNORED_NAMES = {".venv", ".idea", "__pycache__", ".git"}
@@ -17,7 +19,7 @@ def get_project_tree(path: str = ".", max_depth: int = 3) -> dict[str, Any]:
     """Return a compact directory tree while skipping noisy folders."""
 
     try:
-        root = Path(path).expanduser().resolve()
+        root = resolve_working_path(path)
         if not root.exists():
             return {"success": False, "error": f"路径不存在: {path}"}
         if not root.is_dir():
@@ -69,7 +71,7 @@ def find_files(pattern: str, path: str = ".") -> dict[str, Any]:
         if not pattern.strip():
             return {"success": False, "error": "pattern 不能为空。"}
 
-        root = Path(path).expanduser().resolve()
+        root = resolve_working_path(path)
         if not root.exists():
             return {"success": False, "error": f"路径不存在: {path}"}
         if not root.is_dir():
@@ -103,7 +105,7 @@ def search_text(keyword: str, path: str = ".") -> dict[str, Any]:
         if not keyword:
             return {"success": False, "error": "keyword 不能为空。"}
 
-        root = Path(path).expanduser().resolve()
+        root = resolve_working_path(path)
         if not root.exists():
             return {"success": False, "error": f"路径不存在: {path}"}
         if not root.is_dir():
@@ -150,7 +152,7 @@ def _iter_files(root: Path):
     for path in root.rglob("*"):
         if any(part in IGNORED_NAMES for part in path.parts):
             continue
-        if path.is_file():
+        if path.is_file() and not is_private_connection_path(path):
             yield path
 
 

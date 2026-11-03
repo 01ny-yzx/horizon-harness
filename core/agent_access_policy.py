@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
+from core.working_directory import get_working_directory
 from pathlib import Path
 from typing import Any, Literal
 
-
 AGENT_ACCESS_MODES = {"read_only", "full_access"}
+_bound_access_mode: ContextVar[str | None] = ContextVar("agent_access_mode", default=None)
 FileAccessOperation = Literal["read", "write"]
-
 
 @dataclass(frozen=True)
 class AgentAccessDecision:
@@ -50,9 +52,22 @@ class AgentPermissionDecision:
 
 
 def get_agent_access_mode(value: str | None = None) -> str:
-    raw = os.getenv("AGENT_ACCESS_MODE", "read_only") if value is None else value
+    bound = _bound_access_mode.get()
+    raw = bound if bound is not None else (os.getenv("AGENT_ACCESS_MODE", "read_only") if value is None else value)
     normalized = str(raw or "read_only").strip().lower()
     return normalized if normalized in AGENT_ACCESS_MODES else "read_only"
+
+
+@contextmanager
+def access_mode_scope(mode: str | None):
+    """Bind one execution without changing process-wide settings or other sessions."""
+    if mode is not None and mode not in AGENT_ACCESS_MODES:
+        raise ValueError('Invalid access mode')
+    token = _bound_access_mode.set(mode)
+    try:
+        yield
+    finally:
+        _bound_access_mode.reset(token)
 
 
 def is_read_only_access(value: str | None = None) -> bool:
@@ -154,6 +169,11 @@ def evaluate_agent_file_access(
     from config.settings import PROJECT_ROOT
     from core.path_grounding import resolve_host_path
 
-    root = (project_root or PROJECT_ROOT).expanduser().resolve(strict=False)
+    root = (project_root or get_working_directory()).expanduser().resolve(strict=False)
     resolved = resolve_host_path(requested, project_root=root)
+    from core.private_configuration import is_private_connection_path
+    if is_private_connection_path(resolved):
+        return AgentAccessDecision(False, mode, operation, requested,
+            code='agent_private_credentials_blocked',
+            reason='Connection credentials are private. Use the dedicated configuration/status interface.')
     return AgentAccessDecision(True, mode, operation, requested, resolved_path=resolved)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from config.settings import settings
 from core.usage import UsageTracker
 from core.workspace_runtime import get_current_workspace
 
@@ -21,13 +20,8 @@ def get_usage_status(user_id: str | None = None) -> dict[str, Any]:
             "user_id": safe_user,
             "project_id": context.project_id,
             "usage": usage,
-            "limits": {
-                "chat": settings.daily_chat_limit,
-                "rag": settings.daily_rag_limit,
-                "web_search": settings.daily_web_search_limit,
-                "embedding": settings.daily_embedding_limit,
-                "document_load": settings.daily_document_load_limit,
-            },
+            "limits": None,
+            "rate_limit_enabled": False,
         },
     }
 
@@ -49,7 +43,7 @@ USAGE_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_usage_status",
-            "description": "Return today's local usage counters and limits for the current user.",
+            "description": "Return today's local usage counters (no daily quotas) for the current user.",
             "parameters": {"type": "object", "properties": {"user_id": {"type": "string"}}, "required": []},
         },
     },

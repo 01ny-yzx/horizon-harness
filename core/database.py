@@ -89,6 +89,15 @@ SCHEMA_STATEMENTS = (
     ON session_input (session_id, promoted_seq)
     """,
     """
+    CREATE TABLE IF NOT EXISTS session_input_control (
+        message_id TEXT PRIMARY KEY,
+        action TEXT,
+        control_seq INTEGER,
+        claimed INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (message_id) REFERENCES session_input (id) ON DELETE CASCADE
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS session_message (
         id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL,

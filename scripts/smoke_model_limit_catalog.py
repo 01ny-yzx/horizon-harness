@@ -72,9 +72,9 @@ def test_automatic_provider_and_model_resolution() -> None:
     )
     assert deepseek_flash.canonical_id == "deepseek/deepseek-flash"
     assert deepseek_flash.provider_id == "deepseek"
-    assert deepseek_flash.max_context_tokens == 1_000_000
+    assert deepseek_flash.max_context_tokens == 1_048_576
     assert deepseek_flash.max_input_tokens is None
-    assert deepseek_flash.max_output_tokens == 384_000
+    assert deepseek_flash.max_output_tokens == 393_216
     assert not deepseek_flash.ambiguous
     assert deepseek_flash.resolution_reason == "endpoint_provider_exact_model"
 
@@ -116,9 +116,9 @@ def test_deepseek_flash_capabilities_and_factory() -> None:
     assert profile.capabilities.supports_reasoning is True
     assert profile.capabilities.requires_reasoning_echo is True
     assert profile.capabilities.supports_disable_reasoning is True
-    assert profile.capabilities.max_context_tokens == 1_000_000
+    assert profile.capabilities.max_context_tokens == 1_048_576
     assert profile.capabilities.max_input_tokens is None
-    assert profile.capabilities.max_output_tokens == 384_000
+    assert profile.capabilities.max_output_tokens == 393_216
 
     settings = SimpleNamespace(
         llm_provider="openai_compatible",
@@ -138,9 +138,9 @@ def test_deepseek_flash_capabilities_and_factory() -> None:
     assert config.resolved_provider_id == "deepseek"
     assert config.resolved_model_id == "deepseek/deepseek-flash"
     assert config.capabilities is not None
-    assert config.capabilities.max_context_tokens == 1_000_000
+    assert config.capabilities.max_context_tokens == 1_048_576
     assert config.capabilities.max_input_tokens is None
-    assert config.capabilities.max_output_tokens == 384_000
+    assert config.capabilities.max_output_tokens == 393_216
 
 
 def test_field_overrides_and_input_budget() -> None:

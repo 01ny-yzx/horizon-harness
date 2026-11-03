@@ -1,0 +1,15 @@
+{
+  "name": "horizon-harness",
+  "version": "1.0.0",
+  "description": "Horizon terminal AI agent",
+  "private": true,
+  "license": "MIT",
+  "repository": {"type": "git", "url": "https://github.com/01ny-yzx/horizon-harness.git"},
+  "homepage": "https://github.com/01ny-yzx/horizon-harness",
+  "engines": {"node": ">=18"},
+  "os": ["darwin", "win32"],
+  "cpu": ["arm64", "x64"],
+  "bin": {"horizon": "bin/horizon.cjs"},
+  "scripts": {"postinstall": "node scripts/postinstall.cjs"},
+  "files": ["bin", "lib", "scripts", "platforms.json", "README.md", "LICENSE"]
+}

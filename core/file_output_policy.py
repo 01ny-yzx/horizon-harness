@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass
+from core.working_directory import get_working_directory
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +43,7 @@ class FileOutputPolicy:
     """Resolve requested output paths into local paths under the agent access boundary."""
 
     def __init__(self, project_root: Path | None = None) -> None:
-        self.project_root = (project_root or PROJECT_ROOT).resolve()
+        self.project_root = (project_root or get_working_directory()).resolve()
 
     def resolve_output_target(
         self,
@@ -207,7 +208,7 @@ def resolve_existing_write_target(
 
 
 def default_output_root(project_root: Path | None = None) -> Path:
-    return path_zone_default_output_root(project_root or PROJECT_ROOT)
+    return path_zone_default_output_root(project_root or get_working_directory())
 
 
 def _looks_like_directory_request(path: str) -> bool:

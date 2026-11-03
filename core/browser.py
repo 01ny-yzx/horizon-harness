@@ -31,7 +31,7 @@ except ImportError:  # pragma: no cover - dependency may be intentionally absent
     sync_playwright = None  # type: ignore[assignment]
 
 
-INSTALL_PLAYWRIGHT = "请在当前虚拟环境中运行：python -m pip install -r requirements.txt"
+INSTALL_PLAYWRIGHT = "请在当前虚拟环境中运行：python -m pip install -r requirements-browser.txt"
 INSTALL_CHROMIUM = "请运行：python -m playwright install chromium"
 
 

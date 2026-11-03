@@ -20,6 +20,7 @@ except ImportError:  # pragma: no cover
     tavily_errors = None  # type: ignore[assignment]
 
 from core.rate_limit import RateLimiter
+from core.search_connections import SearchConnections
 from core.unicode_safety import sanitize_unicode
 from core.workspace_runtime import get_current_workspace
 
@@ -198,7 +199,7 @@ class TavilyProvider:
 
     def __init__(self, configured_provider: str = "tavily") -> None:
         self.configured_provider = configured_provider
-        self.api_key = os.getenv("TAVILY_API_KEY", "").strip()
+        self.api_key = SearchConnections().key()
 
     def status(self) -> SearchProviderStatus:
         if not self.api_key:
@@ -320,14 +321,17 @@ def resolve_web_search_provider() -> WebSearchProvider:
 
 
 def get_web_search_provider_status() -> SearchProviderStatus:
-    return resolve_web_search_provider().status()
+    try:
+        return resolve_web_search_provider().status()
+    except ValueError:
+        return DisabledProvider(error_code='invalid_search_config',reason='Search configuration could not be read; use /search to review it.').status()
 
 
 def _auto_provider() -> WebSearchProvider:
     skipped: list[dict[str, str]] = [
         {"provider": "searxng", "reason": "searxng_not_implemented"},
     ]
-    if os.getenv("TAVILY_API_KEY", "").strip():
+    if SearchConnections().configured():
         provider = TavilyProvider(configured_provider="auto")
         provider_status = provider.status()
         if provider_status.search_available or provider_status.error_code in {"missing_dependency"}:
@@ -344,6 +348,9 @@ def _auto_provider() -> WebSearchProvider:
 
 
 def _configured_provider() -> str:
+    saved = SearchConnections().provider()
+    if saved:
+        return saved
     return str(os.getenv("WEB_SEARCH_PROVIDER", "auto") or "auto").strip().lower()
 
 

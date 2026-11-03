@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from typing import Literal
 from pydantic import BaseModel, Field
 
 from config.settings import settings
@@ -21,6 +22,7 @@ class ChatRequest(WorkspaceRequest):
     delivery: str = "steer"
     resume: bool = True
     debug: bool = False
+    access_mode: Literal["read_only", "full_access"] | None = None
 
 
 class ChatResponse(BaseModel):

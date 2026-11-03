@@ -8,7 +8,7 @@ and whether validation really happened.
 
 from __future__ import annotations
 
-import os
+from core.working_directory import get_working_directory
 import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
@@ -58,8 +58,8 @@ class TaskState:
     output_files: list[str] = field(default_factory=list)
     created_outputs: list[dict[str, Any]] = field(default_factory=list)
     validation_results: list[dict[str, Any]] = field(default_factory=list)
-    start_cwd: str = field(default_factory=os.getcwd)
-    current_cwd: str = field(default_factory=os.getcwd)
+    start_cwd: str = field(default_factory=lambda: str(get_working_directory()))
+    current_cwd: str = field(default_factory=lambda: str(get_working_directory()))
     consecutive_failures: int = 0
     is_finished: bool = False
     git_repo_root: str = ""

@@ -1,17 +1,8 @@
-"""Workspace isolation prompt rules."""
-
-from __future__ import annotations
-
+"""Focused guidance for legacy callers; shared agent policy governs active packs."""
 
 def build_workspace_prompt() -> str:
-    """Return user/project workspace rules."""
-
-    return """
-Workspace rules:
-1. The Agent runs inside one user/project workspace.
-2. Memories, documents, chunks, vectors, and traces belong only to the current workspace.
-3. Do not search or infer data from another workspace.
-4. After switch_workspace, use the new workspace memory/document/vector stores.
-5. Do not fabricate data for another user or project.
-6. The default workspace is default_user/default_project.
-""".strip()
+    return """Workspace context:
+- Use only the current user's/project's workspace records and runtime-provided directory.
+- A Session-bound agent must not change user/project identity to access another workspace.
+- Workspace context is implementation detail: do not volunteer default IDs, paths or storage internals in ordinary replies.
+- Do not invent state for another user or project.""".strip()

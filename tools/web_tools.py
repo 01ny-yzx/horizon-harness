@@ -368,7 +368,7 @@ WEB_TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "Search the public web for errors, documentation, library usage, and external references through the configured provider.",
+            "description": "Search the public web for current facts, travel guides, recommendations, prices, opening hours, policies, news, technical documentation and external references. Use it when a real-world guide or recommendation needs up-to-date evidence even if the user does not explicitly ask to search. Results are source snippets, not proof that a full page was read.",
             "parameters": {
                 "type": "object",
                 "properties": {

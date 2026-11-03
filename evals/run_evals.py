@@ -822,12 +822,12 @@ def _run_protection_evals() -> list[tuple[str, list[str]]]:
             object.__setattr__(settings, "rate_limit_enabled", True)
             object.__setattr__(settings, "daily_chat_limit", 2)
             quota = limiter.check_and_increment("usage_eval", "chat")
-            if quota.get("allowed") is not False:
-                errors.append(f"expected limit exceeded, got {quota}")
+            if quota.get("allowed") is not True:
+                errors.append(f"expected unlimited usage, got {quota}")
         finally:
             object.__setattr__(settings, "rate_limit_enabled", original_rate)
             object.__setattr__(settings, "daily_chat_limit", original_limit)
-        results.append(("usage_limit_exceeded", errors))
+        results.append(("usage_unlimited", errors))
 
     with TemporaryDirectory() as tmp:
         cache = CacheManager(Path(tmp) / "cache_store")

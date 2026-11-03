@@ -118,6 +118,15 @@ class SessionEventPublisher:
                     event.time_created,
                 ),
             )
+        # Notify only after the transaction commits. Tokens remain transient;
+        # the durable event sequence and projections retain their existing meaning.
+        from core.session_live import session_live
+
+        session_live.publish(aggregate, kind, {
+            key: safe_data[key]
+            for key in ("assistant_message_id", "message_id", "call_id", "name", "text_id", "finish")
+            if key in safe_data
+        })
         return event
 
     def read_aggregate(

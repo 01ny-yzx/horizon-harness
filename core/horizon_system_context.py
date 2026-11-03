@@ -77,6 +77,7 @@ def _render_environment(value: dict[str, Any]) -> str:
             f"  Project identity: {value['project_id']}",
             f"  Is directory a git repo: {'yes' if value['is_git_repo'] else 'no'}",
             f"  Platform: {value['platform']}",
+            "  Command shell: " + ('cmd.exe-compatible (Windows)' if value['platform'] == 'Windows' else '/bin/sh-compatible (POSIX)'),
             "</env>",
         )
     )

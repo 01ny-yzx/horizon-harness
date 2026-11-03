@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from core.workspace import PROJECT_ROOT, WorkspaceManager
+from core.path_grounding import build_path_context
 
 
-ALLOWED_ACTIONS = {"chat", "rag", "web_search", "embedding", "document_load", "sandbox"}
-USAGE_DIR = PROJECT_ROOT / "usage_store"
+ALLOWED_ACTIONS = {"chat", "rag", "web_search", "embedding", "document_load", "sandbox", "browser"}
+LEGACY_USAGE_FILE = PROJECT_ROOT / "usage_store" / "usage.json"
+USAGE_DIR = build_path_context().user_data_root / "usage"
 USAGE_FILE = USAGE_DIR / "usage.json"
 
 
@@ -20,8 +23,11 @@ class UsageTracker:
     """Track daily local usage counters in a small JSON file."""
 
     def __init__(self, usage_path: str | Path | None = None) -> None:
-        self.usage_path = Path(usage_path) if usage_path is not None else USAGE_FILE
+        self.usage_path = Path(usage_path) if usage_path is not None else build_path_context().user_data_root / "usage" / "usage.json"
         self.usage_path.parent.mkdir(parents=True, exist_ok=True)
+        if (usage_path is None and not self.usage_path.exists() and LEGACY_USAGE_FILE.exists()
+                and not (os.getenv('HORIZON_USER_DATA_ROOT') or os.getenv('AGENT_USER_DATA_ROOT'))):
+            shutil.copy2(LEGACY_USAGE_FILE, self.usage_path)
         self._ensure_file()
 
     def increment(self, user_id: str, action: str, amount: int = 1) -> dict[str, Any]:

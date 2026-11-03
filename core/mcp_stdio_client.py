@@ -7,6 +7,7 @@ import os
 import queue
 import re
 import subprocess
+from core.external_process import ExternalPopen
 import threading
 import time
 from typing import Any
@@ -105,7 +106,7 @@ class StdioMCPClient(BaseMCPClient):
         stderr_lines: list[str] = []
         stdout_queue: queue.Queue[str] = queue.Queue()
         try:
-            process = subprocess.Popen(
+            process = ExternalPopen(
                 [str(resolved["resolved_command"]), *expanded_args],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,

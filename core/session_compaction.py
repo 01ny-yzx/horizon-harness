@@ -180,8 +180,10 @@ class SessionCompaction:
             )
             summary = _message_text(result.message).strip()
         except BaseException:
+            self._notify_failed(session_id, message_id)
             return False
         if not summary:
+            self._notify_failed(session_id, message_id)
             return False
 
         recent = "\n\n".join(selection.recent).strip()
@@ -200,6 +202,11 @@ class SessionCompaction:
             time_created=ended_at,
         )
         return True
+
+    @staticmethod
+    def _notify_failed(session_id: str, message_id: str) -> None:
+        from core.session_live import session_live
+        session_live.publish(session_id, 'session.compaction.failed', {'message_id': message_id})
 
 
 def serialize_session_message(message: SessionMessage) -> str:

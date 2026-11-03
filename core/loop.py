@@ -1314,6 +1314,16 @@ def _session_epoch_guidance(
 class AgentLoop:
     """Runs one command-line Agent session."""
 
+    @property
+    def model_name(self):
+        config = getattr(getattr(self, "llm", None), "config", None)
+        return getattr(config, "model", settings.llm_model)
+
+    @property
+    def model_provider(self):
+        config = getattr(getattr(self, "llm", None), "config", None)
+        return getattr(config, "provider", settings.llm_provider)
+
     def __init__(
         self,
         llm: Any,
@@ -1438,8 +1448,8 @@ class AgentLoop:
         self._publish_session_event(
             STEP_STARTED,
             assistant_message_id=message_id,
-            provider=settings.llm_provider,
-            model=settings.llm_model,
+            provider=self.model_provider,
+            model=self.model_name,
         )
         return message_id
 
@@ -1663,15 +1673,19 @@ class AgentLoop:
         user_input: str,
         promotion: str | None,
         cancelled: threading.Event,
-    ) -> None:
+    ) -> str | None:
+        self._session_work_item_outcome = None
         self._session_turn_promotion = promotion
         self._session_cancelled = cancelled
         try:
-            self._run_request(
-                user_input,
-                user_id=self.workspace.user_id,
-                project_id=self.workspace.project_id,
-            )
+            from core.working_directory import working_directory_context
+            with working_directory_context(self._session_info.directory):
+                self._run_request(
+                    user_input,
+                    user_id=self.workspace.user_id,
+                    project_id=self.workspace.project_id,
+                )
+            return self._session_work_item_outcome
         finally:
             self._session_turn_promotion = None
             self._session_cancelled = None
@@ -2004,8 +2018,8 @@ class AgentLoop:
             ],
             reference_guidance_messages=list(reference_guidance.system_messages),
             runtime_model_identity_note=build_runtime_model_identity_note(
-                settings.llm_provider,
-                settings.llm_model,
+                self.model_provider,
+                self.model_name,
             ),
             current_user_included=True,
             agent_turn_context_summary=initial_context_summary,
@@ -2035,7 +2049,7 @@ class AgentLoop:
                     request_guidance_messages=[],
                     reference_guidance_messages=[],
                     runtime_model_identity_note=build_runtime_model_identity_note(
-                        settings.llm_provider, settings.llm_model
+                        self.model_provider, self.model_name
                     ),
                     current_user_included=True,
                     agent_turn_context_summary=summary,
@@ -2107,7 +2121,7 @@ class AgentLoop:
                 surface=initial_surface,
                 options=initial_options,
                 metrics=metrics,
-                model=settings.llm_model,
+                model=self.model_name,
             )
         except Exception as exc:
             raise
@@ -2157,7 +2171,7 @@ class AgentLoop:
                 surface=initial_surface,
                 options=initial_options,
                 metrics=metrics,
-                model=settings.llm_model,
+                model=self.model_name,
             )
         if self._session_info is None:
             self._last_request_guidance_fingerprint = (
@@ -2665,8 +2679,8 @@ class AgentLoop:
                     current_reference_guidance.system_messages
                 ),
                 runtime_model_identity_note=build_runtime_model_identity_note(
-                    settings.llm_provider,
-                    settings.llm_model,
+                    self.model_provider,
+                    self.model_name,
                 ),
                 current_user_included=True,
                 agent_turn_context_summary=agent_turn_context_summary,
@@ -2739,7 +2753,7 @@ class AgentLoop:
                                 request_guidance_messages=[],
                                 reference_guidance_messages=[],
                                 runtime_model_identity_note=build_runtime_model_identity_note(
-                                    settings.llm_provider, settings.llm_model
+                                    self.model_provider, self.model_name
                                 ),
                                 current_user_included=True,
                                 agent_turn_context_summary=summary,
@@ -2990,7 +3004,7 @@ class AgentLoop:
                             tools=scoped_tool_schemas,
                             elapsed_ms=elapsed_ms(llm_started),
                             stage=llm_stage,
-                            model=settings.llm_model,
+                            model=self.model_name,
                             success=False,
                             error_code=exc.__class__.__name__,
                             options=llm_options,
@@ -3004,7 +3018,7 @@ class AgentLoop:
                     tools=scoped_tool_schemas,
                     elapsed_ms=elapsed_ms(llm_started),
                     stage=llm_stage,
-                    model=settings.llm_model,
+                    model=self.model_name,
                     success=True,
                     options=llm_options,
                 )
@@ -3019,7 +3033,7 @@ class AgentLoop:
                             "message_count": metrics.message_count_by_stage.get(llm_stage, 0),
                             "tool_schema_chars": metrics.tool_schema_chars_by_stage.get(llm_stage, 0),
                             **_latest_prompt_pack_trace_fields(metrics, llm_stage),
-                            "model": settings.llm_model,
+                            "model": self.model_name,
                             "success": True,
                             **_llm_profile_trace_fields(llm_options),
                         },
@@ -3869,7 +3883,7 @@ class AgentLoop:
                 session_context.messages if session_context is not None else None
             ),
             current_user_included=session_context is not None,
-            identity_note=build_runtime_model_identity_note(settings.llm_provider, settings.llm_model),
+            identity_note=build_runtime_model_identity_note(self.model_provider, self.model_name),
             system_context_messages=(
                 list(session_context.system_context_messages)
                 if session_context is not None
@@ -3892,7 +3906,7 @@ class AgentLoop:
                         history_messages=context.messages,
                         current_user_included=True,
                         identity_note=build_runtime_model_identity_note(
-                            settings.llm_provider, settings.llm_model
+                            self.model_provider, self.model_name
                         ),
                         system_context_messages=list(context.system_context_messages),
                         request_guidance_messages=[],
@@ -4015,7 +4029,7 @@ class AgentLoop:
                     tools=[],
                     elapsed_ms=elapsed_ms(llm_started),
                     stage="final_answer",
-                    model=settings.llm_model,
+                    model=self.model_name,
                     success=False,
                     error_code=exc.__class__.__name__,
                     options=final_answer_options,
@@ -4027,7 +4041,7 @@ class AgentLoop:
             tools=[],
             elapsed_ms=elapsed_ms(llm_started),
             stage="final_answer",
-            model=settings.llm_model,
+            model=self.model_name,
             success=True,
             options=final_answer_options,
         )
@@ -4041,7 +4055,7 @@ class AgentLoop:
                     "prompt_chars": metrics.prompt_chars_by_stage.get("final_answer", 0),
                     "message_count": metrics.message_count_by_stage.get("final_answer", 0),
                     "tool_schema_chars": metrics.tool_schema_chars_by_stage.get("final_answer", 0),
-                    "model": settings.llm_model,
+                    "model": self.model_name,
                     "success": True,
                     **_llm_profile_trace_fields(final_answer_options),
                 },
@@ -4483,7 +4497,7 @@ class AgentLoop:
                     tools=[],
                     elapsed_ms=elapsed_ms(llm_started),
                     stage="final_answer",
-                    model=settings.llm_model,
+                    model=self.model_name,
                     success=False,
                     error_code=exc.__class__.__name__,
                     options=llm_options,
@@ -4526,7 +4540,7 @@ class AgentLoop:
                 tools=[],
                 elapsed_ms=llm_elapsed,
                 stage="final_answer",
-                model=settings.llm_model,
+                model=self.model_name,
                 success=True,
                 options=llm_options,
             )
@@ -4870,6 +4884,7 @@ class AgentLoop:
             "incomplete_evidence",
         }:
             task_state.metadata["task_outcome_status"] = "incomplete_evidence"
+        self._session_work_item_outcome = task_state.metadata["task_outcome_status"]
         if (
             getattr(self, "session_events", None) is not None
             and final_answer
@@ -5396,7 +5411,7 @@ class AgentLoop:
     ) -> None:
         """Update task state from one tool result."""
 
-        task_state.current_cwd = os.getcwd()
+        task_state.current_cwd = str(build_path_context().project_root)
         base_tool = base_tool_name(tool_name)
         step_name = self._step_for_tool(base_tool, task_state.task_type)
         success = observation.get("success") is True

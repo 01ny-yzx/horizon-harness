@@ -9,6 +9,7 @@ from core.database import DatabaseService, get_database_service
 from core.session import SessionInfo
 from core.session_history import SessionHistory
 from core.session_message import SessionMessage
+from core.session_title import display_title
 
 
 class SessionNotFoundError(LookupError):
@@ -32,7 +33,8 @@ class SessionStore:
             row = connection.execute(
                 """
                 SELECT id, user_id, project_id, workspace_id, directory, title,
-                       time_created, time_updated
+                       time_created, time_updated,
+                       (SELECT prompt FROM session_input i WHERE i.session_id = session.id ORDER BY admitted_seq LIMIT 1) AS first_prompt
                 FROM session
                 WHERE id = ?
                 """,
@@ -65,7 +67,8 @@ class SessionStore:
             rows = connection.execute(
                 """
                 SELECT id, user_id, project_id, workspace_id, directory, title,
-                       time_created, time_updated
+                       time_created, time_updated,
+                       (SELECT prompt FROM session_input i WHERE i.session_id = session.id ORDER BY admitted_seq LIMIT 1) AS first_prompt
                 FROM session
                 """
                 + where
@@ -93,7 +96,7 @@ def _session_from_row(row: Any) -> SessionInfo:
         project_id=str(row["project_id"]),
         workspace_id=str(row["workspace_id"]),
         directory=str(row["directory"]),
-        title=str(row["title"]),
+        title=display_title(str(row["title"]), row["first_prompt"]),
         time_created=int(row["time_created"]),
         time_updated=int(row["time_updated"]),
     )

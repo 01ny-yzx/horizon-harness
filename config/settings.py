@@ -69,7 +69,7 @@ class Settings:
     api_keys: tuple[str, ...] = ("dev-local-key",)
     api_key_header: str = "X-API-Key"
     api_status_public: bool = False
-    rate_limit_enabled: bool = True
+    rate_limit_enabled: bool = False
     daily_chat_limit: int = 100
     daily_rag_limit: int = 200
     daily_web_search_limit: int = 50
@@ -315,7 +315,7 @@ settings = Settings(
     api_keys=_get_csv_env("API_KEYS", "dev-local-key"),
     api_key_header=os.getenv("API_KEY_HEADER", "X-API-Key"),
     api_status_public=_get_bool_env("API_STATUS_PUBLIC", default=False),
-    rate_limit_enabled=_get_bool_env("RATE_LIMIT_ENABLED", default=True),
+    rate_limit_enabled=_get_bool_env("RATE_LIMIT_ENABLED", default=False),
     daily_chat_limit=_get_int_env("DAILY_CHAT_LIMIT", 100),
     daily_rag_limit=_get_int_env("DAILY_RAG_LIMIT", 200),
     daily_web_search_limit=_get_int_env("DAILY_WEB_SEARCH_LIMIT", 50),

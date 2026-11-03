@@ -1,0 +1,74 @@
+#!/bin/sh
+set -eu
+umask 077
+VERSION='@@VERSION@@'
+BASE=${HORIZON_DOWNLOAD_BASE:-https://github.com/01ny-yzx/horizon-harness/releases/download}
+ROOT=${HORIZON_INSTALL_ROOT:-"$HOME/.local/share/horizon"}
+BIN_DIR=${HORIZON_BIN_DIR:-"$HOME/.local/bin"}
+die() { printf 'Horizon install: %s\n' "$*" >&2; exit 1; }
+[ "$(uname -s)" = Darwin ] || die 'This installer supports macOS. On Windows, use npm.'
+case "$(uname -m)" in arm64) TARGET=macos-arm64 ;; x86_64) TARGET=macos-x64 ;; *) die 'Unsupported CPU architecture' ;; esac
+case "$TARGET" in
+@@TARGET_CASES@@
+esac
+[ -n "$EXPECTED_SHA" ] || die "Horizon $VERSION is not available for $TARGET"
+CURRENT=$(/usr/bin/sw_vers -productVersion)
+/usr/bin/awk -v have="$CURRENT" -v need="$MIN_MACOS" 'BEGIN { split(have,h,"."); split(need,n,"."); for(i=1;i<=3;i++){if(h[i]+0>n[i]+0)exit 0;if(h[i]+0<n[i]+0)exit 1} }' || die "This build requires macOS $MIN_MACOS or newer"
+case "$ROOT" in /*) ;; *) die 'Installation paths must be absolute' ;; esac
+case "$BIN_DIR" in /*) ;; *) die 'Installation paths must be absolute' ;; esac
+BIN="$BIN_DIR/horizon"
+if [ -e "$BIN" ] || [ -L "$BIN" ]; then
+  [ -L "$BIN" ] || die "$BIN already exists; choose HORIZON_BIN_DIR or move the existing command first"
+  case "$(readlink "$BIN")" in "$ROOT"/versions/*/horizon) ;; *) die "$BIN belongs to another installation" ;; esac
+fi
+mkdir -p "$ROOT/versions" "$BIN_DIR"
+STAGE=$(mktemp -d "$ROOT/.install.XXXXXX")
+DEST="$ROOT/versions/$VERSION-$TARGET"
+PROMOTED=0
+COMMITTED=0
+LOCKED=0
+cleanup() {
+  if [ "$COMMITTED" = 0 ] && [ "$LOCKED" = 1 ]; then
+    if [ -L "$BIN" ] && [ "$(readlink "$BIN")" = "$DEST/horizon" ]; then
+      if [ -L "$STAGE/old-link" ]; then mv -f "$STAGE/old-link" "$BIN"; else rm "$BIN"; fi
+    fi
+    if [ -d "$STAGE/previous" ]; then
+      rm -rf "$DEST"
+      mv "$STAGE/previous" "$DEST" || return
+    elif [ "$PROMOTED" = 1 ]; then
+      rm -rf "$DEST"
+    fi
+  fi
+  rm -rf "$STAGE"
+  if [ "$LOCKED" = 1 ]; then rmdir "$ROOT/.install-lock"; fi
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+mkdir "$ROOT/.install-lock" 2>/dev/null || die "Another install is running. If interrupted, remove $ROOT/.install-lock and retry."
+LOCKED=1
+if [ -L "$BIN" ]; then ln -s "$(readlink "$BIN")" "$STAGE/old-link"; fi
+ASSET="horizon-$VERSION-$TARGET.tar.gz"
+curl --fail --location --silent --show-error --connect-timeout 15 --max-time 180 "$BASE/v$VERSION/$ASSET" -o "$STAGE/$ASSET"
+ACTUAL=$(/usr/bin/shasum -a 256 "$STAGE/$ASSET" | /usr/bin/awk '{print $1}')
+[ "$ACTUAL" = "$EXPECTED_SHA" ] || die 'Checksum mismatch; existing installation was kept'
+/usr/bin/tar -tzf "$STAGE/$ASSET" > "$STAGE/files"
+while IFS= read -r item; do
+  case "$item" in horizon/*) ;; *) die 'Unsafe archive path' ;; esac
+  case "/$item/" in */../*|*/./*) die 'Unsafe archive path' ;; esac
+done < "$STAGE/files"
+mkdir "$STAGE/unpack"
+/usr/bin/tar -xzf "$STAGE/$ASSET" -C "$STAGE/unpack"
+[ -x "$STAGE/unpack/horizon/horizon" ] || die 'Executable missing from archive'
+[ "$("$STAGE/unpack/horizon/horizon" --version)" = "Horizon $VERSION" ] || die 'Executable version check failed'
+printf '%s\n' "$EXPECTED_SHA" > "$STAGE/unpack/horizon/.horizon-managed"
+if [ -e "$DEST" ] || [ -L "$DEST" ]; then
+  [ ! -L "$DEST" ] && [ -f "$DEST/.horizon-managed" ] || die 'Refusing to replace an unmanaged directory'
+  mv "$DEST" "$STAGE/previous"
+fi
+PROMOTED=1
+mv "$STAGE/unpack/horizon" "$DEST"
+ln -s "$DEST/horizon" "$STAGE/horizon-link"
+mv -f "$STAGE/horizon-link" "$BIN"
+COMMITTED=1
+printf 'Installed Horizon %s: %s\n' "$VERSION" "$BIN"
+case ":$PATH:" in *":$BIN_DIR:"*) printf 'Run: horizon\n' ;; *) printf 'Add %s to PATH, then run horizon.\n' "$BIN_DIR" ;; esac

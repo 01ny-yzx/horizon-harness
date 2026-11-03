@@ -11,6 +11,7 @@ from core.mcp_runtime_manager import get_mcp_runtime_manager
 from core.memory import Memory
 from core.path_grounding import build_path_context
 from core.session import SessionInfo, SessionService
+from core.session_store import SessionNotFoundError
 from core.workspace import WorkspaceContext, WorkspaceManager
 from core.workspace_runtime import set_current_workspace
 
@@ -67,12 +68,22 @@ def create_session_for_workspace(
         user_id=context.user_id,
         project_id=context.project_id,
     )
-    session = SessionService(database_path=context.database_path).create(
+    service = SessionService(database_path=context.database_path)
+    directory = path_context.project_root
+    if session_id is not None:
+        try:
+            directory = service.get(session_id).directory
+        except SessionNotFoundError:
+            pass
+    # A saved Session owns its directory. Adoption still validates user,
+    # project and workspace identity; the caller's launch cwd applies only
+    # when creating a new Session.
+    session = service.create(
         session_id=session_id,
         user_id=context.user_id,
         project_id=context.project_id,
         workspace_id=context.workspace_id,
-        directory=path_context.project_root,
+        directory=directory,
     )
     return context, session
 
@@ -89,8 +100,18 @@ def build_agent_for_session(
     if context.workspace_id != session.workspace_id:
         raise ValueError("Resolved workspace does not match durable Session identity")
     mcp_registry, mcp_runtime_status = runtime_manager_factory().snapshot()
+    if llm_factory is build_default_llm:
+        from core.model_connections import ModelConnections
+        from core.session_model import SessionModelSelection
+        from core.database import get_database_service
+        from core.llm import create_llm_from_settings
+        connections = ModelConnections()
+        selected = SessionModelSelection(get_database_service(context.database_path), connections).get(session.id)
+        llm = create_llm_from_settings(connections.runtime_settings(selected['connection_id'], selected['model']))
+    else:
+        llm = llm_factory()
     return AgentLoop(
-        llm=llm_factory(),
+        llm=llm,
         memory=Memory(),
         session_id=session.id,
         user_id=session.user_id,

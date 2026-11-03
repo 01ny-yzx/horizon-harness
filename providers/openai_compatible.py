@@ -325,7 +325,18 @@ class OpenAICompatibleProvider:
     ) -> LLMChatResult:
         """Send one chat completion request and preserve safe turn metadata."""
 
-        self._validate_config()
+        from providers.streaming import consume_completion, new_call_id, stream_context
+
+        live = stream_context(options.stage if options else "")
+        call_id = new_call_id()
+        if live is not None:
+            live.check()
+        try:
+            self._validate_config()
+        except LLMProviderError:
+            if live is not None:
+                live.emit("llm.failed", {"call_id": call_id})
+            raise
         disable_reasoning = self._should_disable_reasoning_for_request(messages, tools, options=options)
         payload: dict[str, Any] = {
             "model": self.config.model,
@@ -345,15 +356,35 @@ class OpenAICompatibleProvider:
             payload["extra_body"] = extra_body
         payload = sanitize_unicode(payload)
 
+        streaming = live is not None and self.capabilities.supports_streaming is not False
+        if live is not None:
+            live.check()
+            live.emit("llm.started", {"call_id": call_id, "streaming": streaming})
+        if streaming:
+            payload["stream"] = True
+            payload["stream_options"] = {"include_usage": True}
+
         try:
             client = self._client()
             if options is not None and options.timeout is not None:
                 response = client.chat.completions.create(**payload, timeout=options.timeout)
             else:
                 response = client.chat.completions.create(**payload)
+            if streaming:
+                response = consume_completion(response, live, call_id)
+            elif live is not None:
+                live.check()
+                live.emit("llm.ended", {"call_id": call_id})
+        except InterruptedError:
+            raise
         except LLMProviderError:
+            if live is not None:
+                live.emit("llm.failed", {"call_id": call_id})
             raise
         except Exception as exc:
+            if live is not None:
+                live.check()
+                live.emit("llm.failed", {"call_id": call_id})
             safe_error = self._safe_error(exc)
             if "reasoning_content" in safe_error:
                 raise LLMProviderError(
@@ -378,6 +409,8 @@ class OpenAICompatibleProvider:
                 },
             )
         except (AttributeError, IndexError, TypeError) as exc:
+            if live is not None:
+                live.emit("llm.failed", {"call_id": call_id})
             raise LLMProviderError("LLM provider response did not include a compatible assistant message.", code="invalid_provider_response") from exc
 
     def chat(

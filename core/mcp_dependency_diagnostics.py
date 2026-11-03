@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+from core.external_process import run_external
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,7 @@ def check_command(command: str, version_args: list[str] | None = None) -> dict[s
     if version_args is None:
         return result
     try:
-        completed = subprocess.run(
+        completed = run_external(
             [str(resolved["resolved_command"]), *version_args],
             text=True,
             capture_output=True,
@@ -67,7 +68,7 @@ def check_docker() -> dict[str, Any]:
         return result
     _fill_version(result, [str(resolved["resolved_command"]), "--version"])
     try:
-        completed = subprocess.run(
+        completed = run_external(
             [str(resolved["resolved_command"]), "ps"],
             text=True,
             capture_output=True,
@@ -269,7 +270,7 @@ def _dependency_result(name: str, command: str, resolved: dict[str, Any]) -> dic
 
 def _fill_version(result: dict[str, Any], command: list[str]) -> None:
     try:
-        completed = subprocess.run(
+        completed = run_external(
             command,
             text=True,
             capture_output=True,

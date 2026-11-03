@@ -11,6 +11,7 @@ import os
 import re
 from dataclasses import asdict, dataclass
 from dataclasses import replace as dataclass_replace
+from core.working_directory import get_working_directory
 from pathlib import Path
 from typing import Any
 
@@ -84,7 +85,7 @@ def evaluate_file_output_path_zone(
 ) -> PathZoneDecision:
     """Return the file-output write decision for a requested path."""
 
-    project = (project_root or PROJECT_ROOT).resolve()
+    project = (project_root or get_working_directory()).resolve()
     output = (output_root or default_output_root(project)).resolve()
     requested = _clean_path(requested_path)
     raw = _clean_path(raw_requested_path) if raw_requested_path is not None else requested

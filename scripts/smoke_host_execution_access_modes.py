@@ -25,6 +25,12 @@ def _data(result: dict[str, object]) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
 
 
+def python_command(code: str) -> str:
+    import subprocess
+    argv = [sys.executable, '-c', code]
+    return subprocess.list2cmdline(argv) if os.name == 'nt' else shlex.join(argv)
+
+
 def main() -> None:
     saved = {key: os.environ.get(key) for key in ("AGENT_ACCESS_MODE", "HORIZON_USER_DATA_ROOT")}
     original_cwd = Path.cwd()
@@ -56,35 +62,35 @@ def main() -> None:
             ):
                 context = get_host_command_context()
                 assert context.project_root == project.resolve()
-                default = manager.run_local_command("pwd")
+                default = manager.run_local_command("cd" if os.name == "nt" else "pwd")
                 assert default["success"] is True
                 default_data = _data(default)
                 assert default_data["cwd"] == str(project.resolve())
                 assert default_data["path_kind"] == "project_default_cwd"
                 assert default_data["mode"] == "local_host"
 
-                relative = manager.run_local_command("pwd", cwd="subdir")
+                relative = manager.run_local_command("cd" if os.name == "nt" else "pwd", cwd="subdir")
                 assert relative["success"] is True
                 assert _data(relative)["cwd"] == str(subdir.resolve())
 
-                outside = manager.run_local_command("pwd", cwd=str(external))
+                outside = manager.run_local_command("cd" if os.name == "nt" else "pwd", cwd=str(external))
                 assert outside["success"] is True
                 assert _data(outside)["logical_root"] == "external_directory"
 
-                traversal = manager.run_local_command("pwd", cwd="../external")
+                traversal = manager.run_local_command("cd" if os.name == "nt" else "pwd", cwd="../external")
                 assert traversal["success"] is True
                 assert _data(traversal)["cwd"] == str(external.resolve())
 
                 direct_code = "from pathlib import Path; print(Path('exports/manual_regression/large.xlsx').exists())"
                 direct = manager.run_local_command(
-                    f"{shlex.quote(sys.executable)} -c {shlex.quote(direct_code)}"
+                    python_command(direct_code)
                 )
                 assert direct["success"] is True
                 assert "True" in str(_data(direct)["stdout"])
 
                 write_code = "from pathlib import Path; Path('host.txt').write_text('ok')"
                 write = manager.run_local_command(
-                    f"{shlex.quote(sys.executable)} -c {shlex.quote(write_code)}",
+                    python_command(write_code),
                     cwd=str(external),
                 )
                 assert write["success"] is True
@@ -95,7 +101,7 @@ def main() -> None:
                     "['TEMP','TMP','TMPDIR','SANDBOX_ROOT','HORIZON_PROJECT_ROOT','PATH']}))"
                 )
                 environment = manager.run_local_command(
-                    f"{shlex.quote(sys.executable)} -c {shlex.quote(environment_code)}"
+                    python_command(environment_code)
                 )
                 env_payload = json.loads(str(_data(environment)["stdout"]).strip())
                 for key in ("TEMP", "TMP", "TMPDIR", "SANDBOX_ROOT"):
@@ -103,12 +109,12 @@ def main() -> None:
                 assert env_payload["HORIZON_PROJECT_ROOT"] == str(project.resolve())
                 assert env_payload["PATH"]
 
-                missing = manager.run_local_command("pwd", cwd=str(base / "missing"))
+                missing = manager.run_local_command("cd" if os.name == "nt" else "pwd", cwd=str(base / "missing"))
                 assert missing["success"] is False
                 assert missing["error_code"] == "cwd_not_found"
                 cwd_file = base / "cwd-file"
                 cwd_file.write_text("x", encoding="utf-8")
-                not_directory = manager.run_local_command("pwd", cwd=str(cwd_file))
+                not_directory = manager.run_local_command("cd" if os.name == "nt" else "pwd", cwd=str(cwd_file))
                 assert not_directory["success"] is False
                 assert not_directory["error_code"] == "cwd_not_directory"
 

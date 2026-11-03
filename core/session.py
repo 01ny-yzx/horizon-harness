@@ -104,6 +104,12 @@ class SessionService:
         self.store.get(session_id)
         return self.store.context(session_id)
 
+    def transcript(self, session_id: str) -> list[SessionMessage]:
+        """UI history includes admitted inputs and safe run outcomes, never resumes work."""
+        from core.session_history import SessionHistory
+        self.store.get(session_id)
+        return SessionHistory(database=self.database).load_transcript(session_id)
+
     def history(
         self,
         session_id: str,
@@ -175,10 +181,11 @@ class SessionService:
             time_updated=now,
         )
         try:
+            from core.model_default import GlobalModelSelection
             self.events.publish(
                 aggregate_id=session.id,
                 event_type=SESSION_CREATED,
-                data=session.to_event_data(),
+                data={**session.to_event_data(), 'model_selection': GlobalModelSelection().get()},
                 time_created=now,
             )
         except SessionAlreadyProjected:
@@ -196,6 +203,7 @@ class SessionService:
         delivery: str = "steer",
         message_id: str | None = None,
         resume: bool = True,
+        access_mode: str | None = None,
     ) -> AdmittedSessionInput:
         """Durably admit a prompt, optionally wake execution, and return it."""
 
@@ -207,9 +215,15 @@ class SessionService:
             prompt,
             delivery=delivery,
             message_id=message_id or create_session_message_id(),
+            access_mode=access_mode,
         )
         if resume:
-            self._execution().wake(admitted.session_id)
+            if admitted.delivery == 'queue':
+                self._execution().wake(admitted.session_id, restart_on_failure=False)
+            else:
+                self._execution().wake(admitted.session_id)
+            from core.session_title import SessionTitles
+            SessionTitles(self.database).schedule(admitted.session_id)
         return admitted
 
     def _execution(self):

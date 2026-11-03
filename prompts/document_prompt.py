@@ -1,24 +1,10 @@
-"""Prompt rules for local Document Loader, Chunking, and RAG tasks."""
-
-from __future__ import annotations
-
+"""Focused guidance for legacy callers; shared agent policy governs active packs."""
 
 def build_document_prompt() -> str:
-    """Return local document prompt rules."""
-
-    return """
-Document and RAG rules:
-0. "README.md" alone is a local file path reference, not automatically a RAG request.
-1. Paths and queries are parameters only. Choose among the currently supplied document and file tools as needed.
-2. Local document tasks do not require external web tools.
-3. Do not recurse through directories unless the user asks.
-4. Document-grounded answers require successful relevant observations.
-5. If embeddings are unavailable, use another currently available retrieval method when useful and explain the degradation.
-6. Answer document questions only from retrieved chunks. Do not say content is in the document unless a retrieved chunk supports it.
-7. If no relevant chunks are found, say "我没有在已加载文档中找到相关内容".
-8. Do not invent chunk_id, file_name, heading, score, or evidence. Present document evidence naturally from retrieved chunks, and include all necessary evidence directly in the answer without forcing a fixed evidence section.
-9. Do not output embedding arrays.
-10. Do not claim the full text was analyzed unless the relevant document was loaded and chunks were retrieved.
-11. Do not read .env, secret files, Horizon internal persistent-memory/database files, document_store, vector_store, .venv, caches, or unsupported binary formats.
-12. Current supported file types are .txt, .md, .json, .csv, .py, .html, and .htm. PDF, DOCX, PPTX, images, and OCR are not supported in Document Loader v1.
-""".strip()
+    return """Document work:
+- Choose current file/document/retrieval tools according to the request and their supported formats. A filename alone does not automatically require RAG.
+- Read relevant source content before making claims about it. If only a bounded excerpt was returned, do not claim full-document analysis.
+- When the user restricts the answer to documents, use their evidence and state missing information without outside-knowledge filler.
+- Prefer a useful available retrieval method if embeddings are unavailable. Do not invent chunks, filenames, scores or citations.
+- Keep searches scoped to relevant sources; respect private stores and unsupported formats according to runtime policy.
+- Present useful findings and source references naturally, without a mandatory evidence section or raw vector output.""".strip()
