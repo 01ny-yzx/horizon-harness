@@ -147,7 +147,7 @@ npm pack ./dist/distribution/npm --pack-destination ./dist/distribution
 
 正式发布前应加上 `--require-target macos-arm64 --require-target macos-x64 --require-target windows-x64`，确保三个平台齐全。每个运行包都需要对应的 `.sha256` 与 `.build.json` 文件。本机 Mac 构建可能要求较新的系统，最低版本从运行包的 Mach-O 文件读取；正式版本应使用兼容性更广的 CI 产物重新生成安装文件。缺失平台会在本地测试包里省略，不会生成虚假的校验值。
 
-发布时先把对应运行包、校验文件与生成的 `install.sh` 上传到 GitHub 的 `v<版本>` Release，再发布生成目录中的 npm 包。`distribution/npm` 是私有源码模板，不能直接发布。Homebrew 还需把生成的 `Formula/horizon.rb` 放进仓库的 `Formula` 目录。以上操作都应先检查产物；当前工作流只有仓库只读权限，不会替你发布。
+发布时先把对应运行包、校验文件与生成的 `install.sh` 上传到 GitHub 的 `v<版本>` Release，再发布生成目录中的 npm 包。`distribution/npm` 是私有源码模板，不能直接发布。Homebrew 还需把生成的 `Formula/horizon.rb` 放进 `01ny-yzx/homebrew-tap` 仓库的 `Formula` 目录，以支持一行安装。以上操作都应先检查产物；当前工作流只有仓库只读权限，不会替你发布。
 
 正式发布后的使用方式：
 
@@ -161,8 +161,7 @@ curl -fsSL https://github.com/01ny-yzx/horizon-harness/releases/latest/download/
 ```
 
 ```sh
-brew tap 01ny-yzx/horizon https://github.com/01ny-yzx/horizon-harness
-brew install 01ny-yzx/horizon/horizon
+brew install 01ny-yzx/tap/horizon
 ```
 
 npm 对应 macOS arm64/x64 和 Windows x64，前提是该平台的运行包已经发布。curl 与 Homebrew 目前用于 Mac。curl 默认安装到 `~/.local/share/horizon/versions`，命令链接放在 `~/.local/bin`；该目录不在 PATH 时，需要添加一次。安装器不会修改 shell 配置文件，也不会覆盖来历不明的同名命令。可用 `HORIZON_INSTALL_ROOT`、`HORIZON_BIN_DIR` 指定其他绝对路径。

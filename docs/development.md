@@ -147,7 +147,7 @@ npm pack ./dist/distribution/npm --pack-destination ./dist/distribution
 
 A public release should require all intended targets using `--require-target macos-arm64 --require-target macos-x64 --require-target windows-x64`. Each archive needs its `.sha256` and `.build.json` sidecars. A local Mac build may require a much newer macOS than a CI build: the minimum is read from the bundled Mach-O images rather than guessed. Missing targets are omitted from local test installers, never assigned placeholder hashes.
 
-Before publishing, upload matching native archives, checksums and the generated `install.sh` to GitHub Release `v<VERSION>`, then publish the prepared npm package (not `distribution/npm`, which is deliberately private). Put the generated `Formula/horizon.rb` into the repository's `Formula` directory before advertising a tap. Review these files and package contents first; the workflow has read-only repository permissions and cannot publish a release.
+Before publishing, upload matching native archives, checksums and the generated `install.sh` to GitHub Release `v<VERSION>`, then publish the prepared npm package (not `distribution/npm`, which is deliberately private). Publish the generated `Formula/horizon.rb` in the `Formula` directory of `01ny-yzx/homebrew-tap`; this enables automatic tap discovery. Review these files and package contents first; the workflow has read-only repository permissions and cannot publish a release.
 
 After publication, the intended user commands are:
 
@@ -161,8 +161,7 @@ curl -fsSL https://github.com/01ny-yzx/horizon-harness/releases/latest/download/
 ```
 
 ```sh
-brew tap 01ny-yzx/horizon https://github.com/01ny-yzx/horizon-harness
-brew install 01ny-yzx/horizon/horizon
+brew install 01ny-yzx/tap/horizon
 ```
 
 npm supports macOS arm64/x64 and Windows x64 when those assets are present. curl and Homebrew are macOS-only at this stage. The curl installer uses `~/.local/share/horizon/versions` and `~/.local/bin`; if the latter is not on PATH, add it once. It refuses to replace an unrelated existing `horizon` command and never edits shell profiles. `HORIZON_INSTALL_ROOT` and `HORIZON_BIN_DIR` select alternate absolute paths. npm and curl verify embedded SHA-256 values before unpacking; installation is staged and protected against concurrent writers. A crashed install may leave a lock: remove only the reported lock after confirming the installer is no longer running. API keys and session data stay outside all installation directories.

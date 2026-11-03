@@ -20,27 +20,16 @@
 
 ## 安装
 
-支持 macOS（Apple Silicon / Intel）和 Windows x64。运行包已包含 Python，三个平台均通过 CI 构建与运行包检查。
-
-已安装 Node.js 18+：
-
 ```sh
-npm install -g horizon-harness
-horizon
-```
-
-macOS — Homebrew：
-
-```sh
-brew tap 01ny-yzx/horizon https://github.com/01ny-yzx/horizon-harness
-brew install 01ny-yzx/horizon/horizon
-```
-
-macOS — curl：
-
-```sh
+# 直接安装（macOS）
 curl -fsSL https://github.com/01ny-yzx/horizon-harness/releases/latest/download/install.sh | sh
+
+# 软件包管理器（任选一种）
+npm i -g horizon-harness@latest       # macOS / Windows x64，需要 Node.js 18+
+brew install 01ny-yzx/tap/horizon      # macOS
 ```
+
+安装后运行 `horizon`。运行包已包含 Python，支持 Apple Silicon / Intel Mac 和 Windows x64。
 
 curl 默认安装到 `~/.local/bin`，如有提示请将它加入 PATH。也可以直接下载[独立运行包](https://github.com/01ny-yzx/horizon-harness/releases/latest)。
 

@@ -20,27 +20,16 @@ An AI agent for your terminal.
 
 ## Installation
 
-Horizon runs on macOS (Apple Silicon / Intel) and Windows x64. Native bundles include the Python runtime; all three targets pass CI bundle checks.
-
-With Node.js 18+ installed:
-
 ```sh
-npm install -g horizon-harness
-horizon
-```
-
-macOS — Homebrew:
-
-```sh
-brew tap 01ny-yzx/horizon https://github.com/01ny-yzx/horizon-harness
-brew install 01ny-yzx/horizon/horizon
-```
-
-macOS — curl:
-
-```sh
+# Direct install (macOS)
 curl -fsSL https://github.com/01ny-yzx/horizon-harness/releases/latest/download/install.sh | sh
+
+# Package managers (choose one)
+npm i -g horizon-harness@latest       # macOS / Windows x64, requires Node.js 18+
+brew install 01ny-yzx/tap/horizon      # macOS
 ```
+
+Run `horizon` after installation. Native bundles include Python and support Apple Silicon / Intel Macs and Windows x64.
 
 The curl installer uses `~/.local/bin`; add it to your PATH if prompted. You can also download a [native bundle](https://github.com/01ny-yzx/horizon-harness/releases/latest).
 
