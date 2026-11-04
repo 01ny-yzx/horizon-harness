@@ -1,5 +1,83 @@
 [
   {
+    "tag_name": "v1.0.3",
+    "html_url": "https://github.com/01ny-yzx/horizon-harness/releases/tag/v1.0.3",
+    "published_at": "2026-11-04T19:37:09Z",
+    "body": "## What's new\n\n- Delete history sessions with Delete / Backspace in `/session`. Confirm before permanently removing a session and its messages; saved API keys and model settings are kept.\n- Deleted sessions are also removed from open tabs and the saved tab layout.\n- A new public website with installation commands, screenshots, animations, and release history.\n- The TUI version indicator now shows v1.0.3.\n\nNative builds: macOS Apple Silicon, macOS Intel, and Windows x64. Python is bundled.\n\n## 更新内容\n\n- 在 `/session` 中按 Delete / Backspace 删除历史会话，确认后清除该会话及聊天记录；保留 API Key 和模型配置。\n- 同步清理已删除会话的标签页及保存的标签页布局。\n- 上线全新官网，提供安装方式、界面展示、动画和历史版本。\n- TUI 右下角版本号更新为 v1.0.3。\n\n官网：https://01ny-yzx.github.io/horizon-harness/\n\n### Update / 更新\n\n```sh\nnpm install -g horizon-harness@1.0.3\n```\n\n```sh\nbrew update && brew upgrade 01ny-yzx/tap/horizon\n```\n\nClose Horizon before updating on Windows.\nWindows 用户请先退出 Horizon，再执行更新。\n",
+    "assets": [
+      {
+        "name": "horizon-1.0.3-macos-arm64.tar.gz",
+        "size": 27141384,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.3/horizon-1.0.3-macos-arm64.tar.gz"
+      },
+      {
+        "name": "horizon-1.0.3-macos-arm64.tar.gz.build.json",
+        "size": 209,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.3/horizon-1.0.3-macos-arm64.tar.gz.build.json"
+      },
+      {
+        "name": "horizon-1.0.3-macos-arm64.tar.gz.sha256",
+        "size": 99,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.3/horizon-1.0.3-macos-arm64.tar.gz.sha256"
+      },
+      {
+        "name": "horizon-1.0.3-macos-x64.tar.gz",
+        "size": 28026784,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.3/horizon-1.0.3-macos-x64.tar.gz"
+      },
+      {
+        "name": "horizon-1.0.3-macos-x64.tar.gz.build.json",
+        "size": 206,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.3/horizon-1.0.3-macos-x64.tar.gz.build.json"
+      },
+      {
+        "name": "horizon-1.0.3-macos-x64.tar.gz.sha256",
+        "size": 97,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.3/horizon-1.0.3-macos-x64.tar.gz.sha256"
+      },
+      {
+        "name": "horizon-1.0.3-source.zip",
+        "size": 4941418,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.3/horizon-1.0.3-source.zip"
+      },
+      {
+        "name": "horizon-1.0.3-windows-x64.zip",
+        "size": 28283548,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.3/horizon-1.0.3-windows-x64.zip"
+      },
+      {
+        "name": "horizon-1.0.3-windows-x64.zip.build.json",
+        "size": 185,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.3/horizon-1.0.3-windows-x64.zip.build.json"
+      },
+      {
+        "name": "horizon-1.0.3-windows-x64.zip.sha256",
+        "size": 97,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.3/horizon-1.0.3-windows-x64.zip.sha256"
+      },
+      {
+        "name": "horizon-harness-1.0.3.tgz",
+        "size": 6518,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.3/horizon-harness-1.0.3.tgz"
+      },
+      {
+        "name": "horizon.rb",
+        "size": 949,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.3/horizon.rb"
+      },
+      {
+        "name": "install.sh",
+        "size": 3927,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.3/install.sh"
+      },
+      {
+        "name": "release-manifest.json",
+        "size": 848,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.3/release-manifest.json"
+      }
+    ]
+  },
+  {
     "tag_name": "v1.0.2",
     "html_url": "https://github.com/01ny-yzx/horizon-harness/releases/tag/v1.0.2",
     "published_at": "2026-11-03T22:45:45Z",
