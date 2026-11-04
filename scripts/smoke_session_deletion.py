@@ -213,8 +213,19 @@ class DeletionTerminal(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(list(reopened._session_tabs), ['ses_a'])
                 self.assertEqual(reopened.session_id, 'ses_a')
                 await reopened.action_history()
-                await pilot.press('delete', 'right', 'enter')
-                await pilot.pause(.15)
+                await pilot.pause()
+                await pilot.press('delete')
+                await pilot.pause()
+                await pilot.press('right')
+                await pilot.pause()
+                await pilot.press('enter')
+                # Wait for the asynchronous deletion and replacement picker, not a fixed CI delay.
+                for _ in range(100):
+                    await pilot.pause(.05)
+                    if (not reopened._session_tabs
+                            and isinstance(reopened.screen, SessionHistoryPicker)
+                            and reopened.screen.rows == []):
+                        break
                 self.assertEqual(reopened._session_tabs, {})
                 self.assertIsNone(reopened.session_id)
                 self.assertEqual(reopened.screen.rows, [])
