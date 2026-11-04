@@ -40,7 +40,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate --slurp
-          --jq 'add | map(select(.draft == false and .prerelease == false)) |
+          | jq 'add | map(select(.draft == false and .prerelease == false)) |
           map({tag_name, html_url, published_at, body, assets: [.assets[] |
           {name, size, browser_download_url}]})'
           > frontend/public/releases.json
