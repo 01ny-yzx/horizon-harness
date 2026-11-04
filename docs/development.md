@@ -43,7 +43,7 @@ Session requests use the service's workspace identity and ownership checks. Hist
 
 ## Web interface
 
-The repository also contains a React/Vite frontend. Start the API separately, then:
+The `frontend` directory contains the public Horizon product and download website. It runs independently of the API:
 
 ```bash
 cd frontend
@@ -51,7 +51,7 @@ npm install
 npm run dev
 ```
 
-This optional frontend needs Node.js compatible with the versions in [frontend/package.json](../frontend/package.json); Node.js is not required for the Python TUI. The frontend defaults to the local API and has connection settings. This is an application client, not the planned public product website.
+Website development requires Node.js 22.12+. Run `npm run build` to generate static files in `frontend/dist`. The previous agent GUI has been removed; the website only reads public GitHub release metadata and does not access local API keys or sessions. See [website notes](../frontend/README.md).
 
 ## Legacy CLI
 

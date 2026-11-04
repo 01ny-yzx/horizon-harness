@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -40,6 +41,7 @@ class SessionExecutionPort(Protocol):
     def resume(self, session_id: str) -> None: ...
     def wake(self, session_id: str) -> None: ...
     def interrupt(self, session_id: str) -> None: ...
+    def configure_idle(self, session_id: str, update: Callable[[], Any]) -> Any: ...
 
 
 @dataclass(frozen=True)
@@ -97,6 +99,23 @@ class SessionService:
         """List existing durable Sessions, optionally scoped to a workspace."""
 
         return self.store.list(user_id=user_id, project_id=project_id)
+
+    def delete(self, session_id: str) -> None:
+        """Erase one idle conversation atomically, without touching other user data."""
+        from core.session_live import session_live
+        from core.session_store import SessionNotFoundError
+
+        def erase():
+            with self.database.write_transaction() as connection:
+                deleted = connection.execute("DELETE FROM session WHERE id = ?", (str(session_id),))
+                if deleted.rowcount != 1:
+                    raise SessionNotFoundError(str(session_id))
+                # Foreign keys remove messages, inputs, controls, and context epochs.
+                # The event aggregate has its own root and must also be removed.
+                connection.execute("DELETE FROM event_sequence WHERE aggregate_id = ?", (str(session_id),))
+            session_live.discard(str(session_id))
+
+        self._execution().configure_idle(session_id, erase)
 
     def context(self, session_id: str) -> list[SessionMessage]:
         """Read canonical durable Session messages without executing work."""

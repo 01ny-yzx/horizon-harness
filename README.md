@@ -4,7 +4,7 @@
 
 An AI agent for your terminal.
 
-[English](README.md) · [简体中文](README.zh-CN.md)
+[English](README.md) · [简体中文](README.zh-CN.md) · [Website](https://01ny-yzx.github.io/horizon-harness/)
 
 </div>
 

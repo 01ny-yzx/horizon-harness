@@ -71,7 +71,7 @@ class UpdateUI(unittest.IsolatedAsyncioTestCase):
         for method, status in [('source',200),('npm',200),('npm',429)]:
             with self.subTest(method=method,status=status), tempfile.TemporaryDirectory() as temp:
                 async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(status,json={'tag_name':'v1.0.3'}))) as http:
-                    manager=UpdateManager(Path(temp)/'updates.json',installation=Installation(method),http=http)
+                    manager=UpdateManager(Path(temp)/'updates.json',current='1.0.1',installation=Installation(method),http=http)
                     app=HorizonApp(FakeClient(),updater=manager)
                     async with app.run_test(size=(100,30)) as pilot:
                         await app.action_update()
@@ -92,7 +92,7 @@ class UpdateUI(unittest.IsolatedAsyncioTestCase):
                 calls.append(1)
                 return httpx.Response(200,json={'tag_name':'v1.0.3'})
             async with httpx.AsyncClient(transport=httpx.MockTransport(reply)) as http:
-                manager=UpdateManager(Path(temp)/'updates.json',installation=Installation('npm'),http=http)
+                manager=UpdateManager(Path(temp)/'updates.json',current='1.0.1',installation=Installation('npm'),http=http)
                 app=HorizonApp(FakeClient(),updater=manager)
                 async with app.run_test(size=(100,30)) as pilot:
                     await pilot.pause(.1)
@@ -123,7 +123,7 @@ class UpdateUI(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as temp:
             responses=[httpx.Response(429),httpx.Response(429),httpx.Response(200,json={'tag_name':'v1.0.3'})]
             async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:responses.pop(0))) as http:
-                manager=UpdateManager(Path(temp)/'updates.json',installation=Installation('npm'),http=http)
+                manager=UpdateManager(Path(temp)/'updates.json',current='1.0.1',installation=Installation('npm'),http=http)
                 app=HorizonApp(FakeClient(),updater=manager)
                 async with app.run_test(size=(80,24)) as pilot:
                     await pilot.pause(.1)
@@ -144,7 +144,7 @@ class UpdateUI(unittest.IsolatedAsyncioTestCase):
         from scripts.smoke_tui_ui import FakeClient
         with tempfile.TemporaryDirectory() as temp:
             async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(200,json={'tag_name':'v1.0.3'}))) as http:
-                manager=UpdateManager(Path(temp)/'updates.json',installation=Installation('npm'),http=http)
+                manager=UpdateManager(Path(temp)/'updates.json',current='1.0.1',installation=Installation('npm'),http=http)
                 app=HorizonApp(FakeClient(),updater=manager)
                 async with app.run_test(size=(80,24)) as pilot:
                     await pilot.pause(.05)

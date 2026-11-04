@@ -1,0 +1,221 @@
+[
+  {
+    "tag_name": "v1.0.2",
+    "html_url": "https://github.com/01ny-yzx/horizon-harness/releases/tag/v1.0.2",
+    "published_at": "2026-11-03T22:45:45Z",
+    "body": "Horizon Harness 1.0.2\n\nIncludes the complete 1.0.1 update flow and a proxy compatibility fix:\n\n- Check for stable updates on every installed startup; click the version indicator or use `/update` to review, skip, or confirm.\n- Update through the original npm, Homebrew, or curl channel, then restart on success after closing the TUI and local service.\n- Show the working directory beside the model and the version at the bottom right; fix the update dialog's extra inner border.\n- Fix Windows directory hints and transient installer file locks.\n- Bundle SOCKS proxy support, including `socks5h`, and keep failed background checks silent. The native self-test now constructs a SOCKS transport to verify the packaged dependency.\n\n**Existing 1.0.0 / 1.0.1 installations:** upgrade once using the original package manager to obtain this fixed updater. API keys, sessions and settings remain in the user data directory.\n\n```sh\n# npm — macOS / Windows x64\nnpm install -g horizon-harness@1.0.2\n\n# Homebrew — macOS\nbrew update\nbrew upgrade 01ny-yzx/tap/horizon\n\n# curl — macOS\ncurl -fsSL https://github.com/01ny-yzx/horizon-harness/releases/latest/download/install.sh | sh\n```\n\nNative bundles include Python. Supported targets: macOS Apple Silicon, macOS Intel, and Windows x64.\n",
+    "assets": [
+      {
+        "name": "horizon-1.0.2-macos-arm64.tar.gz",
+        "size": 27135773,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.2/horizon-1.0.2-macos-arm64.tar.gz"
+      },
+      {
+        "name": "horizon-1.0.2-macos-arm64.tar.gz.build.json",
+        "size": 209,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.2/horizon-1.0.2-macos-arm64.tar.gz.build.json"
+      },
+      {
+        "name": "horizon-1.0.2-macos-arm64.tar.gz.sha256",
+        "size": 99,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.2/horizon-1.0.2-macos-arm64.tar.gz.sha256"
+      },
+      {
+        "name": "horizon-1.0.2-macos-x64.tar.gz",
+        "size": 28019783,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.2/horizon-1.0.2-macos-x64.tar.gz"
+      },
+      {
+        "name": "horizon-1.0.2-macos-x64.tar.gz.build.json",
+        "size": 206,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.2/horizon-1.0.2-macos-x64.tar.gz.build.json"
+      },
+      {
+        "name": "horizon-1.0.2-macos-x64.tar.gz.sha256",
+        "size": 97,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.2/horizon-1.0.2-macos-x64.tar.gz.sha256"
+      },
+      {
+        "name": "horizon-1.0.2-source.zip",
+        "size": 3202258,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.2/horizon-1.0.2-source.zip"
+      },
+      {
+        "name": "horizon-1.0.2-windows-x64.zip",
+        "size": 28279953,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.2/horizon-1.0.2-windows-x64.zip"
+      },
+      {
+        "name": "horizon-1.0.2-windows-x64.zip.build.json",
+        "size": 185,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.2/horizon-1.0.2-windows-x64.zip.build.json"
+      },
+      {
+        "name": "horizon-1.0.2-windows-x64.zip.sha256",
+        "size": 97,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.2/horizon-1.0.2-windows-x64.zip.sha256"
+      },
+      {
+        "name": "horizon-harness-1.0.2.tgz",
+        "size": 6514,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.2/horizon-harness-1.0.2.tgz"
+      },
+      {
+        "name": "install.sh",
+        "size": 3927,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.2/install.sh"
+      },
+      {
+        "name": "release-manifest.json",
+        "size": 848,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.2/release-manifest.json"
+      }
+    ]
+  },
+  {
+    "tag_name": "v1.0.1",
+    "html_url": "https://github.com/01ny-yzx/horizon-harness/releases/tag/v1.0.1",
+    "published_at": "2026-11-03T22:25:09Z",
+    "body": "**Superseded by [1.0.2](https://github.com/01ny-yzx/horizon-harness/releases/tag/v1.0.2):** the newer release fixes SOCKS proxy support for update checks.\n\nHorizon Harness 1.0.1\n\n- Check for stable updates in the background on each installed startup.\n- Use `/update` or click the version indicator to review, skip, or confirm an update.\n- Update through the original npm, Homebrew, or curl installation channel, then restart automatically after success.\n- Shut down the TUI and local service before installation; npm updates run from the Node launcher so Windows can replace the native files.\n- Show the working directory next to the model and the Horizon version at the bottom right.\n- Fix the extra inner border in the update dialog.\n- Normalize Windows home-directory hints and retry transient installer file locks.\n\n**Upgrading from 1.0.0:** run one of the commands below once to obtain the built-in updater. API keys, conversations, and settings remain in the user data directory.\n\n```sh\n# npm — macOS / Windows x64\nnpm install -g horizon-harness@1.0.1\n\n# Homebrew — macOS\nbrew update\nbrew upgrade 01ny-yzx/tap/horizon\n\n# curl — macOS\ncurl -fsSL https://github.com/01ny-yzx/horizon-harness/releases/latest/download/install.sh | sh\n```\n\nNative bundles include Python. Supported targets: macOS Apple Silicon, macOS Intel, and Windows x64.\n",
+    "assets": [
+      {
+        "name": "horizon-1.0.1-macos-arm64.tar.gz",
+        "size": 27118985,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.1/horizon-1.0.1-macos-arm64.tar.gz"
+      },
+      {
+        "name": "horizon-1.0.1-macos-arm64.tar.gz.build.json",
+        "size": 209,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.1/horizon-1.0.1-macos-arm64.tar.gz.build.json"
+      },
+      {
+        "name": "horizon-1.0.1-macos-arm64.tar.gz.sha256",
+        "size": 99,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.1/horizon-1.0.1-macos-arm64.tar.gz.sha256"
+      },
+      {
+        "name": "horizon-1.0.1-macos-x64.tar.gz",
+        "size": 28003035,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.1/horizon-1.0.1-macos-x64.tar.gz"
+      },
+      {
+        "name": "horizon-1.0.1-macos-x64.tar.gz.build.json",
+        "size": 206,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.1/horizon-1.0.1-macos-x64.tar.gz.build.json"
+      },
+      {
+        "name": "horizon-1.0.1-macos-x64.tar.gz.sha256",
+        "size": 97,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.1/horizon-1.0.1-macos-x64.tar.gz.sha256"
+      },
+      {
+        "name": "horizon-1.0.1-source.zip",
+        "size": 3202072,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.1/horizon-1.0.1-source.zip"
+      },
+      {
+        "name": "horizon-1.0.1-windows-x64.zip",
+        "size": 28258735,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.1/horizon-1.0.1-windows-x64.zip"
+      },
+      {
+        "name": "horizon-1.0.1-windows-x64.zip.build.json",
+        "size": 185,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.1/horizon-1.0.1-windows-x64.zip.build.json"
+      },
+      {
+        "name": "horizon-1.0.1-windows-x64.zip.sha256",
+        "size": 97,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.1/horizon-1.0.1-windows-x64.zip.sha256"
+      },
+      {
+        "name": "horizon-harness-1.0.1.tgz",
+        "size": 6516,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.1/horizon-harness-1.0.1.tgz"
+      },
+      {
+        "name": "install.sh",
+        "size": 3927,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.1/install.sh"
+      },
+      {
+        "name": "release-manifest.json",
+        "size": 848,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.1/release-manifest.json"
+      }
+    ]
+  },
+  {
+    "tag_name": "v1.0.0",
+    "html_url": "https://github.com/01ny-yzx/horizon-harness/releases/tag/v1.0.0",
+    "published_at": "2026-11-03T20:49:18Z",
+    "body": "Horizon Harness 1.0.0\n\nTerminal AI agent with streaming responses, tool activity, persistent sessions, model configuration, message queues, and English / Chinese / Japanese interfaces.\n\nNative bundles include the Python runtime. Supported targets: macOS Apple Silicon, macOS Intel, and Windows x64. All three CI builds and bundle checks passed.\n\nmacOS installation:\n```sh\ncurl -fsSL https://github.com/01ny-yzx/horizon-harness/releases/latest/download/install.sh | sh\n```\n\nInstall with npm (Node.js 18+):\n```sh\nnpm install -g horizon-harness\nhorizon\n```\n\nmacOS Homebrew:\n```sh\nbrew install 01ny-yzx/tap/horizon\n```\n\nAlternatively, download the archive for your platform below.\n",
+    "assets": [
+      {
+        "name": "horizon-1.0.0-macos-arm64.tar.gz",
+        "size": 27102425,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.0/horizon-1.0.0-macos-arm64.tar.gz"
+      },
+      {
+        "name": "horizon-1.0.0-macos-arm64.tar.gz.build.json",
+        "size": 209,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.0/horizon-1.0.0-macos-arm64.tar.gz.build.json"
+      },
+      {
+        "name": "horizon-1.0.0-macos-arm64.tar.gz.sha256",
+        "size": 99,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.0/horizon-1.0.0-macos-arm64.tar.gz.sha256"
+      },
+      {
+        "name": "horizon-1.0.0-macos-x64.tar.gz",
+        "size": 27984895,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.0/horizon-1.0.0-macos-x64.tar.gz"
+      },
+      {
+        "name": "horizon-1.0.0-macos-x64.tar.gz.build.json",
+        "size": 206,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.0/horizon-1.0.0-macos-x64.tar.gz.build.json"
+      },
+      {
+        "name": "horizon-1.0.0-macos-x64.tar.gz.sha256",
+        "size": 97,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.0/horizon-1.0.0-macos-x64.tar.gz.sha256"
+      },
+      {
+        "name": "horizon-1.0.0-source.zip",
+        "size": 3186719,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.0/horizon-1.0.0-source.zip"
+      },
+      {
+        "name": "horizon-1.0.0-windows-x64.zip",
+        "size": 28248823,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.0/horizon-1.0.0-windows-x64.zip"
+      },
+      {
+        "name": "horizon-1.0.0-windows-x64.zip.build.json",
+        "size": 185,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.0/horizon-1.0.0-windows-x64.zip.build.json"
+      },
+      {
+        "name": "horizon-1.0.0-windows-x64.zip.sha256",
+        "size": 97,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.0/horizon-1.0.0-windows-x64.zip.sha256"
+      },
+      {
+        "name": "horizon-harness-1.0.0.tgz",
+        "size": 4995,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.0/horizon-harness-1.0.0.tgz"
+      },
+      {
+        "name": "install.sh",
+        "size": 3867,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.0/install.sh"
+      },
+      {
+        "name": "release-manifest.json",
+        "size": 848,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.0/release-manifest.json"
+      }
+    ]
+  }
+]

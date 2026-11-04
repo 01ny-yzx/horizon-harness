@@ -4,7 +4,7 @@
 
 终端里的 AI 助手。
 
-[English](README.md) · [简体中文](README.zh-CN.md)
+[English](README.md) · [简体中文](README.zh-CN.md) · [官网](https://01ny-yzx.github.io/horizon-harness/)
 
 </div>
 

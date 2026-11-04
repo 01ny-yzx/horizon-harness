@@ -55,6 +55,7 @@ You can also run `horizon upgrade` in the terminal. Source checkouts update thro
 ## Conversations and tabs
 
 - `/session` lists saved conversations; `/new` creates a new conversation.
+- In history, select a session with the arrow keys. Enter opens it; Delete (Backspace also works on Mac) requests deletion. Clicking a session opens it directly. The confirmation defaults to Cancel; select Delete with → and press Enter, or click Delete. This permanently removes the conversation, messages, queue, and corresponding tab. API keys, global settings, long-term memory, and project files remain intact. Interrupt a running session before deleting it.
 - Select a tab to switch sessions. Use `+` to create one; hover over a tab to show `×`. Closing a tab does not delete its history.
 - Open tab IDs, order, and selected tab are saved across restarts. Unsent drafts and live fragments are retained only during the current TUI process.
 - User messages and failure/interruption records remain available when a model request fails. Opening history does not resubmit them or restart a task.

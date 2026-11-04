@@ -22,6 +22,7 @@ from textual.widgets.text_area import TextAreaTheme
 
 from tui.terminal_colors import TerminalBackground, color_driver, message_background
 from tui.pickers import ConnectionForm, SelectionPicker, SearchConfigForm
+from tui.session_history import SessionHistoryPicker
 from tui.options import KeyboardOptionList
 from tui.model_menu import PROVIDER_NAMES, PROVIDER_ORDER, visible_provider_ids
 from tui.welcome import WelcomeScreen, render_home_logo
@@ -211,6 +212,8 @@ class HorizonApp(App):
         self._restore_tab_id: str | None = None
         self._last_saved_tabs = None
         self._tab_save_error = False
+        self._deleting_session = False
+        self._deleted_session_ids: set[str] = set()
         self._admitting = False
         self._navigating = False
         self._home_draft = ''
@@ -303,6 +306,8 @@ class HorizonApp(App):
         self._render_composer_hint()
 
     async def action_language(self):
+        if self._deleting_session:
+            return
         if isinstance(self.screen, ModalScreen):
             return
         rows = [{'id': code, 'current': code == self.language,
@@ -571,7 +576,8 @@ class HorizonApp(App):
         self._tabs_refreshing = True
         try:
             sessions, active = await asyncio.gather(self.client.sessions(), self.client.active())
-            self._active_tab_sessions = set(active)
+            sessions = [row for row in sessions if row['id'] not in self._deleted_session_ids]
+            self._active_tab_sessions = set(active) - self._deleted_session_ids
             if not self._tabs_initialized:
                 layout = None
                 if self._tab_layout_store is not None:
@@ -604,7 +610,7 @@ class HorizonApp(App):
             self._tabs_refreshing = False
 
     def _navigation_blocked(self) -> bool:
-        return self._admitting or self._navigating or (
+        return self._deleting_session or self._admitting or self._navigating or (
             self.busy and self.session_id not in self._active_tab_sessions)
 
     async def on_session_tab_bar_selected(self, event: SessionTabBar.Selected) -> None:
@@ -773,6 +779,8 @@ class HorizonApp(App):
             self._queue_sending = False
 
     def action_queue_guide(self, message_id=None):
+        if self._deleting_session:
+            return
         if isinstance(self.screen, ModalScreen) or self._queue_controlling or self._queue_session_id != self.session_id:
             return
         sid = self.session_id
@@ -822,6 +830,8 @@ class HorizonApp(App):
     async def on_prompt_input_submitted(self, event: PromptInput.Submitted) -> None:
         if event.text.strip().casefold() == 'exit':
             self.exit()
+            return
+        if self._deleting_session or self._prompt_widget.disabled:
             return
         commands = {'/models': 'models', '/session': 'session', '/sessions': 'session', '/new': 'new', '/help': 'help', '/language': 'language', '/search': 'search', '/update': 'update'}
         if event.text in commands:
@@ -922,6 +932,8 @@ class HorizonApp(App):
         self.query_one('#version-hint', Static).update(hint)
 
     async def action_update(self):
+        if self._deleting_session:
+            return
         if isinstance(self.screen, ModalScreen):
             return
         if self.busy or self._admitting or self._navigating or self._active_tab_sessions:
@@ -943,6 +955,8 @@ class HorizonApp(App):
             self.exit()
 
     async def action_search(self):
+        if self._deleting_session:
+            return
         if self.busy or isinstance(self.screen,ModalScreen):
             self.notify('请先按 Esc 中断当前任务',severity='warning')
             return
@@ -960,6 +974,8 @@ class HorizonApp(App):
             self.notify('无法读取搜索配置',severity='error')
 
     async def action_models(self):
+        if self._deleting_session:
+            return
         if self.busy or isinstance(self.screen, ModalScreen):
             self.notify('请先按 Esc 中断当前任务', severity='warning')
             return
@@ -1095,6 +1111,8 @@ class HorizonApp(App):
             field.call_after_refresh(field.sync_terminal_cursor)
 
     async def _send(self, text: str, *, access_mode: str | None = None) -> None:
+        if self._deleting_session or self._prompt_widget.disabled:
+            return
         self._restore_tab_id = None
         self._admitting = True
         mode = access_mode or self._access_mode
@@ -1436,11 +1454,54 @@ class HorizonApp(App):
                 if not title or title.startswith('New session - '):
                     title = self.tr('空白会话')
                 label = ('✓ ' if session['id'] == self.session_id else '  ') + title
-                rows.append({'id': session['id'], 'label': label + '  · ' + when})
-            self.push_screen(SelectionPicker(self.tr('历史会话'), rows),
-                             lambda row: self._spawn(self._open(row['id'])) if row else None)
+                rows.append({'id': session['id'], 'title': title, 'label': label + '  · ' + when})
+            def picked(row):
+                if row:
+                    self._spawn(self._delete_session(row['id']) if row.get('_delete') else self._open(row['id']))
+            self.push_screen(SessionHistoryPicker(self.tr('历史会话'), rows), picked)
         except Exception:
             self.notify("无法读取历史会话", severity='error')
+
+    async def _delete_session(self, session_id: str) -> None:
+        if self._deleting_session or self._admitting or self._navigating:
+            return
+        self._deleting_session = True
+        was_disabled = self._prompt_widget.disabled
+        self._prompt_widget.disabled = True
+        deleted = False
+        try:
+            await self.client.delete_session(session_id)
+            deleted = True
+            self._deleted_session_ids.add(session_id)
+            self._session_tabs.pop(session_id, None)
+            self._closed_tab_views.pop(session_id, None)
+            self._session_directories.pop(session_id, None)
+            self._saved_drafts.pop(session_id, None)
+            if self._queue_retry and self._queue_retry[0][0] == session_id:
+                self._queue_retry = None
+            self._active_tab_sessions.discard(session_id)
+            if self._restore_tab_id == session_id:
+                self._restore_tab_id = None
+        except Exception as exc:
+            self.notify(str(exc) if isinstance(exc, RuntimeError) else '无法删除会话，请重试', severity='error')
+        except BaseException:
+            self._prompt_widget.disabled = was_disabled
+            raise
+        finally:
+            self._deleting_session = False
+        try:
+            if deleted:
+                if self.session_id == session_id:
+                    self._set_phase('', busy=False)
+                    await self.action_new_session()
+                await self._sync_tabs()
+                self.notify('会话已删除')
+        finally:
+            self._prompt_widget.disabled = was_disabled
+            if not was_disabled:
+                self._prompt_widget.focus()
+        if not self._quitting:
+            await self.action_history()
 
     async def _open(self, session_id: str) -> None:
         if isinstance(self.screen, ModalScreen):
@@ -1498,6 +1559,8 @@ class HorizonApp(App):
             self._navigating = False
 
     def action_help(self) -> None:
+        if self._deleting_session:
+            return
         if not isinstance(self.screen, ModalScreen):
             self.push_screen(HelpScreen())
 

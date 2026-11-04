@@ -43,7 +43,7 @@ curl -X POST http://127.0.0.1:8000/chat \
 
 ## Web 界面
 
-仓库保留了 React/Vite 前端。先单独启动 API，再执行：
+`frontend` 是 Horizon 产品与下载官网，独立运行，不需要启动 API：
 
 ```bash
 cd frontend
@@ -51,7 +51,7 @@ npm install
 npm run dev
 ```
 
-此可选前端需要与 [frontend/package.json](../frontend/package.json) 中版本兼容的 Node.js，Python TUI 不需要 Node.js。前端默认连接本地 API，提供连接设置；这是应用客户端，不是计划中的产品官网。
+官网开发需要 Node.js 22.12+，执行 `npm run build` 生成 `frontend/dist` 静态页面。旧 Agent GUI 已移除；官网只读取公开的 GitHub 发布信息，不访问本地 API Key 或会话。详见[官网说明](../frontend/README.md)。
 
 ## 原有 CLI
 

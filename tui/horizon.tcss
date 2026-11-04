@@ -107,7 +107,7 @@ MarkdownFence { background: ansi_default; border: solid ansi_bright_black; text-
 .short-home #home, .compact-home #home { padding-top: 0; }
 .short-home #home-logo { height: 3; }
 .short-home #welcome { margin-top: 0; }
-SelectionPicker, ConnectionForm, SearchConfigForm, HelpScreen { align: center middle; background: ansi_default; }
+SelectionPicker, ConnectionForm, SearchConfigForm, HelpScreen, SessionDeleteConfirm { align: center middle; background: ansi_default; }
 #session-picker, #help-panel {
     width: 80%; max-width: 80; height: auto; max-height: 85%;
     padding: 1 2; border: round ansi_default; background: ansi_default;
@@ -212,3 +212,16 @@ ShortcutSettings, KeyCapture { align: center middle; background: ansi_default; }
 #help-content { height: 1fr; max-height: 100%; }
 #shortcut-settings { height: 20; }
 #shortcut-options { height: 1fr; max-height: 100%; }
+
+#session-delete-confirm {
+    width: 54; max-width: 90%; height: auto; padding: 1 2;
+    border: round ansi_default; background: ansi_default;
+}
+#session-delete-warning { height: auto; color: #f2a35c; content-align: center middle; text-align: center; }
+.terminal-light #session-delete-warning { color: #b45309; }
+.session-delete-actions { height: 1; margin-top: 1; align: center middle; }
+.session-delete-actions Button {
+    height: 1; min-height: 1; width: 10; min-width: 0; margin: 0 1;
+    border: none; background: ansi_default; color: ansi_default;
+}
+.session-delete-actions Button:focus, .session-delete-actions Button:hover { text-style: bold reverse; }

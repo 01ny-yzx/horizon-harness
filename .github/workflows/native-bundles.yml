@@ -34,7 +34,7 @@ jobs:
         with:
           node-version: '22'
       - run: python -m pip install -r requirements-build.txt
-      - run: python -m unittest scripts.smoke_bundle_entry scripts.smoke_tui_updates scripts.smoke_tui_workspace_hint -q
+      - run: python -m unittest scripts.smoke_bundle_entry scripts.smoke_tui_updates scripts.smoke_tui_workspace_hint scripts.smoke_session_deletion -q
       - run: python scripts/build_bundle.py
       - run: python scripts/prepare_installers.py
       - run: node --test distribution/tests/npm.test.cjs

@@ -43,6 +43,11 @@ class LiveJournal:
                 self._channels.popitem(last=False)
             return event
 
+    def discard(self, session_id: str) -> None:
+        """Forget transient replay when the durable conversation is deleted."""
+        with self._lock:
+            self._channels.pop(session_id, None)
+
     def read(self, session_id: str, after: int = 0) -> LiveBatch:
         with self._lock:
             seq, events = self._channels.get(session_id, (0, ()))

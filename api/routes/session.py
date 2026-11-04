@@ -121,6 +121,21 @@ def active_sessions(
         _raise_api_error(exc)
 
 
+@router.delete("/{session_id}", response_model=ApiResponse)
+def delete_session(session_id: str, user_id: str = settings.default_user_id,
+                   project_id: str = settings.default_project_id) -> ApiResponse:
+    from core.session_run_coordinator import SessionBusyError
+    try:
+        service, safe_user, safe_project = _service(user_id, project_id)
+        _owned(service, session_id, safe_user, safe_project)
+        service.delete(session_id)
+        return ApiResponse(success=True, data={"id": session_id, "deleted": True})
+    except SessionBusyError:
+        raise HTTPException(409, "请先中断该会话的任务，再删除会话") from None
+    except Exception as exc:
+        _raise_api_error(exc)
+
+
 @router.get("/{session_id}", response_model=ApiResponse)
 def get_session(
     session_id: str,

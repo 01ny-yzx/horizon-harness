@@ -10,6 +10,16 @@ LANGUAGES = (('en', 'English'), ('zh', '中文'), ('ja', '日本語'))
 
 # Chinese source labels also serve as stable internal activity identifiers.
 _TEXT = {
+    '打开': ('Open', '開く'),
+    '删除所选会话': ('Delete selected session', '選択した会話を削除'),
+    '删除这个会话？': ('Delete this session?', 'この会話を削除しますか？'),
+    '会话和聊天记录将永久删除，无法恢复。': ('The session and its messages will be permanently deleted.', '会話とチャット履歴は完全に削除され、復元できません。'),
+    '删除': ('Delete', '削除'),
+    '←→ 选择  Enter 确认  Esc 取消': ('←→ Select  Enter Confirm  Esc Cancel', '←→ 選択  Enter 確定  Esc キャンセル'),
+    '↑↓ 选择  Enter 打开  Delete 删除  Esc 返回': ('↑↓ Select  Enter Open  Delete Remove  Esc Back', '↑↓ 選択  Enter 開く  Delete 削除  Esc 戻る'),
+    '请先中断该会话的任务，再删除会话': ('Interrupt this session before deleting it', '実行中のタスクを中断してから会話を削除してください'),
+    '无法删除会话，请重试': ('Could not delete the session; please try again', '会話を削除できませんでした。再試行してください'),
+    '会话已删除': ('Session deleted', '会話を削除しました'),
     '默认模型已更新，新会话生效': ('Default model updated for new sessions', '既定のモデルを更新しました。新しい会話に適用されます'),
     '已复制': ('Copied', 'コピーしました'),
     '复制失败，请重试': ('Could not copy; please try again', 'コピーできませんでした。再試行してください'),

@@ -33,6 +33,8 @@ class HorizonClient:
                                            params=self.identity if method in {"GET", "DELETE"} else None,
                                            json={**self.identity, **(body or {})} if method not in {"GET", "DELETE"} else None)
         if not response.is_success:
+            if response.status_code == 409 and method == 'DELETE' and path.startswith('/session/') and path.count('/') == 2:
+                raise RuntimeError(translate('请先中断该会话的任务，再删除会话', self.language))
             if response.status_code in {400, 409} and (path.startswith(('/models','/search')) or path.endswith('/model')):
                 detail = response.json().get('detail')
                 if isinstance(detail, str):
@@ -75,6 +77,9 @@ class HorizonClient:
 
     async def sessions(self):
         return await self._request("GET", "/session")
+
+    async def delete_session(self, session_id: str):
+        return await self._request("DELETE", f"/session/{session_id}")
 
     async def active(self):
         return await self._request("GET", "/session/active")
