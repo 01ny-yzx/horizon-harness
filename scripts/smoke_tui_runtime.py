@@ -86,13 +86,54 @@ class RuntimeContracts(unittest.IsolatedAsyncioTestCase):
             process.returncode = 0
         process.terminate.side_effect = terminate
         service = LocalService()
-        with patch('tui.runtime.asyncio.create_subprocess_exec', new_callable=AsyncMock) as spawn:
+        def stop_group(*args):
+            if process.returncode is None:
+                process.terminate()
+        with patch('tui.runtime.asyncio.create_subprocess_exec', new_callable=AsyncMock) as spawn, \
+                patch('tui.runtime.os.killpg', create=True, side_effect=stop_group), \
+                patch('core.external_process.run_external', side_effect=lambda *a, **k: (terminate() or type('Result', (), {'returncode': 0})())):
             spawn.return_value = process
             with self.assertRaises(RuntimeError):
                 await service.start(timeout=.03)
-        process.terminate.assert_called_once()
+        if sys.platform != 'win32':
+            process.terminate.assert_called_once()
         self.assertIsNone(service._reader)
         self.assertIsNone(service._log)
+
+    async def test_stop_removes_owned_service_descendants(self):
+        from tui.runtime import LocalService, _service_executable
+        import signal
+        with TemporaryDirectory() as directory:
+            heartbeat = Path(directory) / 'heartbeat'
+            pidfile = Path(directory) / 'child-pid'
+            child = ("import os,time;from pathlib import Path;"
+                     f"Path({str(pidfile)!r}).write_text(str(os.getpid()));"
+                     f"p=Path({str(heartbeat)!r});end=time.monotonic()+8\n"
+                     "while time.monotonic()<end:\n p.open('a').write('x');time.sleep(.02)\n")
+            parent = ("import subprocess,sys,time;"
+                      f"subprocess.Popen([sys.executable,'-c',{child!r}]);time.sleep(10)")
+            env = dict(os.environ)
+            process = await asyncio.create_subprocess_exec(_service_executable(env), '-c', parent, env=env,
+                        **({'start_new_session': True} if sys.platform != 'win32' else {}))
+            service = LocalService()
+            service.process = process
+            service._owns_process_group = sys.platform != 'win32'
+            try:
+                for _ in range(200):
+                    if heartbeat.exists() and heartbeat.stat().st_size: break
+                    await asyncio.sleep(.02)
+                self.assertTrue(heartbeat.exists())
+                await service.stop()
+                await asyncio.sleep(.1)
+                before = heartbeat.read_text()
+                await asyncio.sleep(.15)
+                self.assertEqual(heartbeat.read_text(), before, 'Service descendant survived shutdown')
+            finally:
+                if process.returncode is None:
+                    process.kill(); await process.wait()
+                if pidfile.exists():
+                    try: os.kill(int(pidfile.read_text()), signal.SIGTERM)
+                    except OSError: pass
 
     async def test_sse_parser_preserves_chinese_fragmented_frames_and_cursor(self):
         from tui.client import HorizonClient

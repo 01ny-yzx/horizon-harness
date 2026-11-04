@@ -45,7 +45,7 @@ class InstallationChannels(unittest.TestCase):
         cls.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True); cls.thread.start()
         cls.base = f'http://127.0.0.1:{cls.server.server_port}'
-        cls.env = dict(os.environ, HORIZON_DOWNLOAD_BASE=cls.base,
+        cls.env = dict(os.environ, HORIZON_BINARY_CACHE=str(cls.root / 'runtimes'), HORIZON_DOWNLOAD_BASE=cls.base,
                        HORIZON_USER_DATA_ROOT=str(cls.root / 'userdata'),
                        NPM_CONFIG_USERCONFIG=str(cls.root / 'empty.npmrc'),
                        NPM_CONFIG_CACHE=str(cls.root / 'npm-cache'))
@@ -80,13 +80,13 @@ class InstallationChannels(unittest.TestCase):
         cwd = self.root / '用户 working directory'; cwd.mkdir()
         self.run_command([str(executable), '--_horizon-self-test'], env=offline, cwd=cwd)
         package = prefix / 'lib' / 'node_modules' / 'horizon-harness'
-        native = package / 'native' / 'horizon'
+        native = Path(self.env['HORIZON_BINARY_CACHE']) / VERSION / ('macos-arm64-' + self.manifest['targets']['macos-arm64']['sha256']) / 'native' / 'horizon'
         probe = self.root / 'probe-npm.py'
         probe.write_text('from tui.updates import detect_installation\nprint(detect_installation().method)\n')
         detected = self.run_command([str(executable), '--_horizon-python', str(probe)], env=offline)
         self.assertEqual(detected.stdout.strip(), 'npm')
         before = hashlib.sha256(native.read_bytes()).hexdigest()
-        (package / 'native' / 'installation.json').unlink()
+        native.with_name('installation.json').unlink()
         code = "require(process.argv[1]).install({root:process.argv[2],base:process.argv[3]}).catch(e=>{console.error(e.message);process.exitCode=1})"
         bad = self.run_command(['node', '-e', code, str(package / 'lib' / 'install.cjs'), str(package), self.base + '/corrupt'], success=False)
         self.assertIn('checksum mismatch', bad.stderr)

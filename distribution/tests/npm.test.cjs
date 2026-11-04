@@ -84,7 +84,7 @@ test('npm update waits for native shutdown, installs pinned version, and starts 
   fs.mkdirSync(path.join(root, 'native'), {recursive:true});
   const calls=[];
   try {
-    const result=await launch('fake-native', ['--project','test'], {root,npmCLI:'fake-npm-cli.js',
+    const result=await launch('fake-native', ['--project','test'], {root,install:async()=>path.join(root,'native/horizon'),npmCLI:'fake-npm-cli.js',
       run:async (file,args,options={}) => {
         calls.push({file,args,env:options.env});
         if(calls.length === 1) {
@@ -109,7 +109,7 @@ test('failed npm update never restarts or reports success', async () => {
   const root=path.join(prefix,'node_modules/horizon-harness');
   let count=0;
   try {
-    const result=await launch('fake-native',[],{root,npmCLI:'fake-npm',run:async (file,args,options={})=>{
+    const result=await launch('fake-native',[],{root,install:async()=>path.join(root,'native/horizon'),npmCLI:'fake-npm',run:async (file,args,options={})=>{
       count++;
       if(count===1){fs.writeFileSync(options.env.HORIZON_UPDATE_REQUEST,JSON.stringify({version:'1.0.2'}));return {code:85,signal:null};}
       return {code:1,signal:null};
@@ -127,7 +127,7 @@ test('real child-process handoff upgrades after exit and restarts without requir
   fs.writeFileSync(npm,`require('node:fs').writeFileSync(${JSON.stringify(path.join(root,'native/installation.json'))},JSON.stringify({version:'1.0.2'}));`);
   fs.writeFileSync(path.join(root,'bin/horizon.cjs'),`require('node:fs').writeFileSync(${JSON.stringify(marker)},'ok');`);
   try {
-    const result=await launch(process.execPath,[native],{root,npmCLI:npm});
+    const result=await launch(process.execPath,[native],{root,install:async()=>path.join(root,'native/horizon'),npmCLI:npm});
     assert.equal(result.code,0);assert.equal(fs.readFileSync(marker,'utf8'),'ok');
   } finally {fs.rmSync(prefix,{recursive:true,force:true});}
 });
@@ -157,4 +157,39 @@ test('Windows directory promotion retries only transient sharing violations', as
   }}),/locked/);
   assert.ok(attempts>1);
   await assert.rejects(renameWithRetry('stage','native',{platform:'win32',rename:()=>{throw Object.assign(new Error('missing'),{code:'ENOENT'});}}),/missing/);
+});
+
+test('npm runtime files live outside the package and are isolated by version, platform and checksum', () => {
+  const { runtimeRoot } = require('../npm/lib/install.cjs');
+  const hash = 'a'.repeat(64), otherHash = 'b'.repeat(64);
+  for (const platform of ['darwin', 'win32']) {
+    const cacheRoot = path.join(os.tmpdir(), 'horizon-cache-fixture');
+    const first = runtimeRoot('1.0.3', platform === 'win32' ? 'windows-x64' : 'macos-arm64', hash, {cacheRoot});
+    assert.ok(first.startsWith(cacheRoot + path.sep));
+    assert.notEqual(first, runtimeRoot('1.0.4', platform === 'win32' ? 'windows-x64' : 'macos-arm64', hash, {cacheRoot}));
+    assert.notEqual(first, runtimeRoot('1.0.3', platform === 'win32' ? 'windows-x64' : 'macos-arm64', otherHash, {cacheRoot}));
+    assert.notEqual(first, runtimeRoot('1.0.3', 'macos-x64', hash, {cacheRoot}));
+  }
+  assert.throws(() => runtimeRoot('../bad', 'windows-x64', hash), /Invalid/);
+  assert.throws(() => runtimeRoot('1.0.3', '../bad', hash), /Invalid/);
+  assert.throws(() => runtimeRoot('1.0.3', 'windows-x64', '../bad'), /Invalid/);
+});
+
+test('update rereads package version after npm replaces files in the same Node process', async () => {
+  const { install, runtimeRoot } = require('../npm/lib/install.cjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'horizon-refresh-version-'));
+  const cacheRoot = path.join(root, 'separate-cache'), hash = 'a'.repeat(64), target = 'windows-x64';
+  const packageFile = path.join(root, 'package.json');
+  try {
+    fs.writeFileSync(packageFile, JSON.stringify({version:'1.0.3'}));
+    require(packageFile); // A launcher in an older process has already loaded this file.
+    fs.writeFileSync(packageFile, JSON.stringify({version:'1.0.4'}));
+    fs.writeFileSync(path.join(root,'platforms.json'), JSON.stringify({version:'1.0.4',targets:{[target]:{
+      filename:'horizon-1.0.4-windows-x64.zip',sha256:hash}}}));
+    const native = path.join(runtimeRoot('1.0.4',target,hash,{cacheRoot}), 'native');
+    fs.mkdirSync(native,{recursive:true});
+    fs.writeFileSync(path.join(native,'horizon.exe'),'fixture');
+    fs.writeFileSync(path.join(native,'installation.json'),JSON.stringify({version:'1.0.4',sha256:hash}));
+    assert.equal(await install({root,target,cacheRoot}),path.join(native,'horizon.exe'));
+  } finally {delete require.cache[packageFile];fs.rmSync(root,{recursive:true,force:true});}
 });

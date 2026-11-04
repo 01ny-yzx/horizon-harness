@@ -2,6 +2,7 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import time
 from pathlib import Path
 import shutil
 import subprocess
@@ -11,13 +12,13 @@ import threading
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def main():
-    output = ROOT / 'dist' / 'distribution'
+def main(output=None, artifacts=None):
+    output = output or ROOT / 'dist' / 'distribution'
     manifest = json.loads((output / 'release-manifest.json').read_text())
     if len(manifest['targets']) != 1:
         raise SystemExit('Run native download smoke with exactly one CI target artifact')
     item = next(iter(manifest['targets'].values()))
-    archive = ROOT / 'dist' / 'bundles' / item['filename']
+    archive = (artifacts or ROOT / 'dist' / 'bundles') / item['filename']
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -35,12 +36,45 @@ def main():
             package = root / 'package'; shutil.copytree(output / 'npm', package)
             cwd = root / '用户 workspace'; cwd.mkdir()
             env = dict(os.environ, HORIZON_DOWNLOAD_BASE=f'http://127.0.0.1:{server.server_port}',
-                       HORIZON_USER_DATA_ROOT=str(root / 'userdata'))
+                       HORIZON_USER_DATA_ROOT=str(root / 'userdata'), HORIZON_BINARY_CACHE=str(root / 'runtimes'))
             subprocess.run(['node', str(package / 'scripts' / 'postinstall.cjs')], cwd=cwd, env=env, check=True, timeout=180)
             # Prove subsequent launches use the cached binary, not the network.
             env['HORIZON_DOWNLOAD_BASE'] = 'http://127.0.0.1:1'
             subprocess.run(['node', str(package / 'bin' / 'horizon.cjs'), '--_horizon-self-test'],
                            cwd=cwd, env=env, check=True, timeout=120)
+            # Keep the real bundled interpreter and base_library.zip open while npm's
+            # entire package directory is replaced. Windows must allow this rename.
+            code = "require(process.argv[1]).install({root:process.argv[2]}).then(p=>console.log(p))"
+            native = Path(subprocess.check_output(['node', '-e', code, str(package / 'lib' / 'install.cjs'), str(package)],
+                                                 cwd=cwd, env=env, text=True).strip())
+            assert native.is_relative_to(root / 'runtimes') and not native.is_relative_to(package)
+            assert not (package / 'native').exists()
+            ready, stop = root / 'ready', root / 'stop'
+            probe = root / 'hold-runtime.py'
+            probe.write_text('import sys,time\nfrom pathlib import Path\n'
+                             'with (Path(sys._MEIPASS)/"base_library.zip").open("rb") as held:\n'
+                             '    Path(sys.argv[1]).touch()\n'
+                             '    while not Path(sys.argv[2]).exists(): time.sleep(.05)\n')
+            child = subprocess.Popen([str(native), '--_horizon-python', str(probe), str(ready), str(stop)],
+                                     cwd=cwd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            try:
+                deadline = time.monotonic() + 20
+                while not ready.exists() and child.poll() is None and time.monotonic() < deadline:
+                    time.sleep(.05)
+                assert ready.exists(), 'Bundled interpreter did not hold the runtime file'
+                previous = root / 'old-package'
+                package.rename(previous)
+                shutil.copytree(previous, package)
+                subprocess.run(['node', str(package / 'bin' / 'horizon.cjs'), '--version'],
+                               cwd=cwd, env=env, check=True, timeout=30)
+                assert child.poll() is None, 'Replacing npm package must not stop an unrelated running window'
+            finally:
+                stop.touch()
+                try:
+                    child.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
+                    child.kill(); child.communicate()
+
     finally:
         server.shutdown(); server.server_close(); thread.join()
     print('Native npm downloader and offline launcher: PASS')

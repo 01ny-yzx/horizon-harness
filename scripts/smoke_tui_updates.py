@@ -165,6 +165,21 @@ class UpdateUI(unittest.IsolatedAsyncioTestCase):
             await app.action_update()
             self.assertNotIsInstance(app.screen,UpdateDialog)
 
+class CachedNpmDetection(unittest.TestCase):
+    def test_cached_binary_keeps_npm_channel_only_for_exact_launcher_executable(self):
+        from tui.updates import detect_installation
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / 'node_modules' / 'horizon-harness'
+            exe = Path(temp) / 'cache' / 'version' / 'native' / 'horizon'
+            exe.parent.mkdir(parents=True)
+            exe.touch()
+            env = {'HORIZON_NPM_ROOT': str(root), 'HORIZON_UPDATE_REQUEST': str(Path(temp) / 'request.json'),
+                   'HORIZON_NPM_EXECUTABLE': str(exe)}
+            with patch.object(sys, 'frozen', True, create=True), patch.object(sys, 'executable', str(exe)), patch.dict('os.environ', env):
+                self.assertEqual(detect_installation().method, 'npm')
+                with patch.dict('os.environ', {'HORIZON_NPM_EXECUTABLE': str(exe.with_name('another'))}):
+                    self.assertEqual(detect_installation().method, 'unknown')
+
 class UpdateExecution(unittest.TestCase):
     def test_npm_handoff_occurs_without_starting_a_package_manager_in_native_process(self):
         from tui.updates import perform_update

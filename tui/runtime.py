@@ -5,6 +5,7 @@ import asyncio
 import os
 from pathlib import Path
 import secrets
+import signal
 import json
 import sys
 import tempfile
@@ -48,6 +49,7 @@ class LocalService:
         self.process: asyncio.subprocess.Process | None = None
         self._log = None
         self._reader = None
+        self._owns_process_group = False
 
     @property
     def url(self) -> str:
@@ -68,8 +70,9 @@ class LocalService:
                 *_service_command(env), cwd=self.directory, env=env,
                 stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
-                **({'creationflags': 0x08000000} if sys.platform == 'win32' else {}),
+                **({'creationflags': 0x08000000} if sys.platform == 'win32' else {'start_new_session': True}),
             )
+            self._owns_process_group = sys.platform != 'win32'
             ready = asyncio.get_running_loop().create_future()
             self._reader = asyncio.create_task(self._read_output(ready))
             try:
@@ -117,13 +120,33 @@ class LocalService:
         process = self.process
         if process is not None and process.returncode is None:
             try:
-                process.terminate()
+                if sys.platform == 'win32':
+                    # Terminate the owned tree while its root still exists; killing
+                    # only the root leaves bundled Python tools holding runtime files.
+                    from core.external_process import run_external
+                    result = await asyncio.to_thread(run_external,
+                        [str(Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32' / 'taskkill.exe'),
+                         '/PID', str(process.pid), '/T', '/F'],
+                        capture_output=True, timeout=10)
+                    if result.returncode and process.returncode is None:
+                        raise RuntimeError('Could not stop the local service process tree; update was cancelled')
+                elif self._owns_process_group:
+                    os.killpg(process.pid, signal.SIGTERM)
+                else:
+                    process.terminate()
                 await asyncio.wait_for(process.wait(), timeout=4)
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
             except ProcessLookupError:
                 await process.wait()
+        if process is not None and self._owns_process_group:
+            try:
+                # The server may exit before an ignoring or detached-waiting tool.
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            self._owns_process_group = False
         if self._reader is not None:
             if not self._reader.done():
                 self._reader.cancel()

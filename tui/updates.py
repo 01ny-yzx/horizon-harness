@@ -40,7 +40,9 @@ def detect_installation() -> Installation:
     exe = Path(sys.executable).resolve()
     request = os.environ.get('HORIZON_UPDATE_REQUEST', '')
     root = os.environ.get('HORIZON_NPM_ROOT', '')
-    if request and root and exe.parent == (Path(root) / 'native').resolve():
+    launched_exe = os.environ.get('HORIZON_NPM_EXECUTABLE', '')
+    if request and root and (exe.parent == (Path(root) / 'native').resolve()
+                             or (launched_exe and exe == Path(launched_exe).resolve())):
         return Installation('npm', request=request)
     brew = shutil.which('brew')
     if sys.platform == 'darwin' and brew and '/Cellar/horizon/' in str(exe):

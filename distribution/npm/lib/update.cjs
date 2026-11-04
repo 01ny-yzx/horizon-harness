@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { run } = require('./run.cjs');
+const { install } = require('./install.cjs');
 const UPDATE_EXIT = 85;
 function validateRequest(data) {
   if (!data || typeof data.version !== 'string' || data.version.length > 64 ||
@@ -39,7 +40,7 @@ async function launch(executable, args, options = {}) {
   const root = options.root || path.resolve(__dirname, '..');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'horizon-update-'));
   const request = path.join(directory, 'request.json');
-  const env = {...process.env, HORIZON_NPM_ROOT:root, HORIZON_UPDATE_REQUEST:request};
+  const env = {...process.env, HORIZON_NPM_ROOT:root, HORIZON_NPM_EXECUTABLE:executable, HORIZON_UPDATE_REQUEST:request};
   const runner = options.run || run;
   try {
     const result = await runner(executable, args, {env});
@@ -55,7 +56,8 @@ async function launch(executable, args, options = {}) {
       return {code:1, signal:null};
     }
     // A successful npm exit is insufficient: scripts may have been disabled.
-    const receipt = JSON.parse(fs.readFileSync(path.join(root, 'native/installation.json'), 'utf8'));
+    const updatedExecutable = await (options.install || install)({root});
+    const receipt = JSON.parse(fs.readFileSync(path.join(path.dirname(updatedExecutable), 'installation.json'), 'utf8'));
     if (receipt.version !== version) throw new Error('Native update incomplete. Run npm rebuild -g horizon-harness.');
     console.log(`Horizon ${version} installed. Restarting…`);
     return await runner(process.execPath, [path.join(root,'bin/horizon.cjs'), ...args.filter((arg,index) => !(index === 0 && arg === 'upgrade'))]);

@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const crypto = require('node:crypto');
 const { Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
@@ -69,6 +70,18 @@ async function download(url, file) {
   await pipeline(response, check, fs.createWriteStream(file, {mode:0o600}));
   return hash.digest('hex');
 }
+// Immutable, versioned runtime storage must not be inside npm's replaceable package.
+function runtimeRoot(version, target, sha256, options = {}) {
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version) ||
+      !['macos-arm64', 'macos-x64', 'windows-x64'].includes(target) ||
+      !/^[a-f0-9]{64}$/.test(sha256)) throw new Error('Invalid Horizon runtime identity');
+  const home = os.homedir();
+  const base = options.cacheRoot || process.env.HORIZON_BINARY_CACHE ||
+    (process.platform === 'win32' ? path.join(process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'horizon-harness', 'runtimes') :
+     process.platform === 'darwin' ? path.join(home, 'Library', 'Caches', 'horizon-harness', 'runtimes') :
+     path.join(process.env.XDG_CACHE_HOME || path.join(home, '.cache'), 'horizon-harness', 'runtimes'));
+  return path.resolve(base, version, target + '-' + sha256);
+}
 function executableAt(root, target) {
   return path.join(root, 'native', target.startsWith('windows') ? 'horizon.exe' : 'horizon');
 }
@@ -105,7 +118,7 @@ async function renameWithRetry(source, destination, options = {}) {
 }
 async function install(options = {}) {
   const root = options.root || path.resolve(__dirname, '..');
-  const version = options.version || require(path.join(root, 'package.json')).version;
+  const version = options.version || JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
   const manifest = options.manifest || JSON.parse(fs.readFileSync(path.join(root, 'platforms.json'), 'utf8'));
   const target = options.target || targetFor();
   const item = validateManifest(manifest, version, target);
@@ -117,8 +130,9 @@ async function install(options = {}) {
       if ((current[i] || 0) < (minimum[i] || 0)) throw new Error(`This Horizon build requires macOS ${item.minimum_macos}+`);
     }
   }
-  const executable = executableAt(root, target);
-  const receipt = path.join(root, 'native', 'installation.json');
+  const runtime = runtimeRoot(version, target, item.sha256, options);
+  const executable = executableAt(runtime, target);
+  const receipt = path.join(runtime, 'native', 'installation.json');
   const cached = () => {
     try {
       const saved = JSON.parse(fs.readFileSync(receipt, 'utf8'));
@@ -126,12 +140,13 @@ async function install(options = {}) {
     } catch { return false; }
   };
   if (cached()) return executable;
-  const release = await acquireLock(root);
+  fs.mkdirSync(runtime, {recursive:true});
+  const release = await acquireLock(runtime);
   try {
   if (cached()) return executable;
   const base = (options.base || process.env.HORIZON_DOWNLOAD_BASE || manifest.download_base).replace(/\/$/, '');
-  const stage = fs.mkdtempSync(path.join(root, '.horizon-download-'));
-  const native = path.join(root, 'native');
+  const stage = fs.mkdtempSync(path.join(runtime, '.horizon-download-'));
+  const native = path.join(runtime, 'native');
   const backup = path.join(stage, 'previous');
   let keepStage = false;
   try {
@@ -164,4 +179,4 @@ async function install(options = {}) {
   }
   } finally { release(); }
 }
-module.exports = {targetFor, validateManifest, safeEntries, acquireLock, download, renameWithRetry, install};
+module.exports = {targetFor, validateManifest, safeEntries, acquireLock, download, renameWithRetry, runtimeRoot, install};
