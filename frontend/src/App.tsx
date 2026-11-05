@@ -149,7 +149,7 @@ export default function App() {
     };
   }, []);
   const latest = releases[0],
-    version = latest?.tag_name || "v1.0.3";
+    version = latest?.tag_name || "v1.0.4";
   const commands: Record<string, string> = {
     npm: "npm install -g horizon-harness",
     brew: "brew install 01ny-yzx/tap/horizon",

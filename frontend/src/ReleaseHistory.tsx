@@ -237,57 +237,67 @@ export default function ReleaseHistory({
             )}
           </time>
           <h3>
-            {r.tag_name === "v1.0.3"
-              ? t(
-                  "让每一段会话，都井然有序。",
-                  "A little more room to move forward.",
-                )
-              : r.tag_name === "v1.0.2"
+            {r.tag_name === "v1.0.4"
+              ? t("更新更稳，继续向前。", "A smoother way to stay up to date.")
+              : r.tag_name === "v1.0.3"
                 ? t(
-                    "更可靠的连接，更完整的体验。",
-                    "Better connected. Ready for more.",
+                    "让每一段会话，都井然有序。",
+                    "A little more room to move forward.",
                   )
-                : r.tag_name === "v1.0.1"
-                  ? t("更新体验，迈出下一步。", "A new way to stay up to date.")
-                  : r.tag_name === "v1.0.0"
-                    ? t("你好，Horizon。", "Hello, Horizon.")
-                    : t(
-                        "新的进展，持续发生。",
-                        "More progress. More possibilities.",
-                      )}
+                : r.tag_name === "v1.0.2"
+                  ? t(
+                      "更可靠的连接，更完整的体验。",
+                      "Better connected. Ready for more.",
+                    )
+                  : r.tag_name === "v1.0.1"
+                    ? t(
+                        "更新体验，迈出下一步。",
+                        "A new way to stay up to date.",
+                      )
+                    : r.tag_name === "v1.0.0"
+                      ? t("你好，Horizon。", "Hello, Horizon.")
+                      : t(
+                          "新的进展，持续发生。",
+                          "More progress. More possibilities.",
+                        )}
           </h3>
           <p>
-            {r.tag_name === "v1.0.3"
+            {r.tag_name === "v1.0.4"
               ? t(
-                  "新增历史会话删除，键盘选择、确认后删除，并同步清理标签与排队内容。官网也带来了逐字浮现、界面预览与竖向版本轮盘。",
-                  "Delete saved conversations with keyboard selection and explicit confirmation. Tabs and queued messages are cleaned up together. The new website adds character reveals, screen previews, and an arc-shaped release timeline.",
+                  "修复 Windows 自动更新时文件被占用的问题。运行文件按版本独立保存，退出时清理本地服务及其子进程，并同步验证 macOS 两种架构。",
+                  "Fixes Windows update file locks with separate, versioned runtimes and owned service process cleanup. Verified on Windows x64 and both macOS architectures.",
                 )
-              : r.tag_name === "v1.0.2"
+              : r.tag_name === "v1.0.3"
                 ? t(
-                    "补齐 SOCKS 代理支持，改善联网检查的稳定性。包含完整的版本更新流程、底栏信息调整，以及 Windows 安装兼容修复。",
-                    "SOCKS proxy support and reliable update checks. Includes the complete updater, a refined footer, and Windows installation fixes.",
+                    "新增历史会话删除，键盘选择、确认后删除，并同步清理标签与排队内容。官网也带来了逐字浮现、界面预览与竖向版本轮盘。",
+                    "Delete saved conversations with keyboard selection and explicit confirmation. Tabs and queued messages are cleaned up together. The new website adds character reveals, screen previews, and an arc-shaped release timeline.",
                   )
-                : r.tag_name === "v1.0.1"
+                : r.tag_name === "v1.0.2"
                   ? t(
-                      "每次启动检查更新，通过 /update 确认升级。工作目录与版本信息，一眼可见。",
-                      "Check for updates on startup and upgrade through /update. Working directory and version, at a glance.",
+                      "补齐 SOCKS 代理支持，改善联网检查的稳定性。包含完整的版本更新流程、底栏信息调整，以及 Windows 安装兼容修复。",
+                      "SOCKS proxy support and reliable update checks. Includes the complete updater, a refined footer, and Windows installation fixes.",
                     )
-                  : r.tag_name !== "v1.0.0"
-                    ? r.body
-                        .split("\n")
-                        .filter((line) => line.startsWith("- "))
-                        .slice(0, 3)
-                        .join(" ")
-                        .replace(/^- /, "")
-                        .slice(0, 380) ||
-                      t(
-                        "在 GitHub 查看完整更新说明。",
-                        "View the full release notes on GitHub.",
+                  : r.tag_name === "v1.0.1"
+                    ? t(
+                        "每次启动检查更新，通过 /update 确认升级。工作目录与版本信息，一眼可见。",
+                        "Check for updates on startup and upgrade through /update. Working directory and version, at a glance.",
                       )
-                    : t(
-                        "Horizon Harness 的首个正式版本。流式对话、会话管理、模型配置与任务排队，来到你的终端。",
-                        "The first stable release. Streaming conversations, persistent sessions, model configuration and queued tasks in your terminal.",
-                      )}
+                    : r.tag_name !== "v1.0.0"
+                      ? r.body
+                          .split("\n")
+                          .filter((line) => line.startsWith("- "))
+                          .slice(0, 3)
+                          .join(" ")
+                          .replace(/^- /, "")
+                          .slice(0, 380) ||
+                        t(
+                          "在 GitHub 查看完整更新说明。",
+                          "View the full release notes on GitHub.",
+                        )
+                      : t(
+                          "Horizon Harness 的首个正式版本。流式对话、会话管理、模型配置与任务排队，来到你的终端。",
+                          "The first stable release. Streaming conversations, persistent sessions, model configuration and queued tasks in your terminal.",
+                        )}
           </p>
           <a className="small-link" href={r.html_url}>
             {t("完整更新说明", "Full release notes")}

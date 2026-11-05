@@ -133,7 +133,7 @@ These are test builds. macOS uses ad-hoc signing; Developer ID signing/notarizat
 
 ## Installation channels
 
-The installation-channel code is prepared but has not been published. Do not advertise public installation commands until the matching GitHub release assets and npm package exist.
+Public installation uses GitHub Releases, npm and the Homebrew tap. Each new version must publish matching native assets and installer metadata.
 
 Run the manual **Native terminal bundles** workflow. Each job builds and tests its native executable, records its minimum macOS version where applicable, and tests the Node downloader against a loopback server. The final job assembles all three targets into an npm tarball, a macOS `install.sh`, a Homebrew formula and a release manifest. It does not publish anything.
 
@@ -163,6 +163,8 @@ curl -fsSL https://github.com/01ny-yzx/horizon-harness/releases/latest/download/
 ```sh
 brew install 01ny-yzx/tap/horizon
 ```
+
+npm stores native runtimes outside `node_modules`, under a version, target and SHA-256 directory in the user cache (`~/Library/Caches/horizon-harness/runtimes` on macOS, `%LOCALAPPDATA%/horizon-harness/runtimes` on Windows). Replacing the npm package does not overwrite a running version. `HORIZON_BINARY_CACHE` can override this cache location. Configuration, API keys and sessions remain in their existing user data directory.
 
 npm supports macOS arm64/x64 and Windows x64 when those assets are present. curl and Homebrew are macOS-only at this stage. The curl installer uses `~/.local/share/horizon/versions` and `~/.local/bin`; if the latter is not on PATH, add it once. It refuses to replace an unrelated existing `horizon` command and never edits shell profiles. `HORIZON_INSTALL_ROOT` and `HORIZON_BIN_DIR` select alternate absolute paths. npm and curl verify embedded SHA-256 values before unpacking; installation is staged and protected against concurrent writers. A crashed install may leave a lock: remove only the reported lock after confirming the installer is no longer running. API keys and session data stay outside all installation directories.
 

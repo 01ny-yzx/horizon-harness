@@ -133,7 +133,7 @@ GitHub Actions 中可手动运行 **Native terminal bundles**，分别生成 mac
 
 ## npm、curl 与 Homebrew 安装入口
 
-安装入口代码已经准备，但还没有公开发布。GitHub Release 与 npm 包实际存在之前，不要把下面的安装命令当成已经可用。
+公开安装通过 GitHub Releases、npm 和 Homebrew tap 提供。每次发布都需要同步对应版本的运行包与安装清单。
 
 手动运行 **Native terminal bundles** 工作流：各平台先构建、自检，记录运行包实际要求的最低 macOS 版本，再通过本地下载服务器测试 Node 安装器。最后汇总三个平台，生成 npm 压缩包、macOS 的 `install.sh`、Homebrew Formula 与发布清单，整个流程不会自动发布。
 
@@ -163,6 +163,8 @@ curl -fsSL https://github.com/01ny-yzx/horizon-harness/releases/latest/download/
 ```sh
 brew install 01ny-yzx/tap/horizon
 ```
+
+npm 的运行文件保存在 `node_modules` 之外，按版本、平台和 SHA-256 隔离：macOS 为 `~/Library/Caches/horizon-harness/runtimes`，Windows 为 `%LOCALAPPDATA%/horizon-harness/runtimes`。替换 npm 包不会覆盖仍在运行的旧版本，可通过 `HORIZON_BINARY_CACHE` 指定其他缓存位置。配置、API Key 和会话仍保存在原有用户数据目录。
 
 npm 对应 macOS arm64/x64 和 Windows x64，前提是该平台的运行包已经发布。curl 与 Homebrew 目前用于 Mac。curl 默认安装到 `~/.local/share/horizon/versions`，命令链接放在 `~/.local/bin`；该目录不在 PATH 时，需要添加一次。安装器不会修改 shell 配置文件，也不会覆盖来历不明的同名命令。可用 `HORIZON_INSTALL_ROOT`、`HORIZON_BIN_DIR` 指定其他绝对路径。
 
