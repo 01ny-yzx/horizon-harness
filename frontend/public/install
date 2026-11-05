@@ -1,0 +1,10 @@
+#!/bin/sh
+# Stable website entry point; the release installer owns version and checksum checks.
+set -eu
+installer=$(mktemp "${TMPDIR:-/tmp}/horizon-install.XXXXXX")
+trap 'rm -f "$installer"' EXIT
+trap 'exit 1' HUP INT TERM
+curl -fsSL --connect-timeout 15 --max-time 120 \
+  https://github.com/01ny-yzx/horizon-harness/releases/latest/download/install.sh \
+  -o "$installer"
+/bin/sh "$installer" "$@"

@@ -157,7 +157,7 @@ horizon
 ```
 
 ```sh
-curl -fsSL https://github.com/01ny-yzx/horizon-harness/releases/latest/download/install.sh | sh
+curl -fsSL https://01ny.club/install | sh
 ```
 
 ```sh

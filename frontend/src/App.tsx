@@ -153,7 +153,7 @@ export default function App() {
   const commands: Record<string, string> = {
     npm: "npm install -g horizon-harness",
     brew: "brew install 01ny-yzx/tap/horizon",
-    curl: `curl -fsSL ${repo}/releases/latest/download/install.sh | sh`,
+    curl: "curl -fsSL https://01ny.club/install | sh",
   };
   async function copy() {
     try {

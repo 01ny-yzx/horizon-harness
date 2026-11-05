@@ -16,4 +16,4 @@ Release data loads from GitHub's public releases API, with a checked-in `public/
 
 Original TUI screenshots are reused from `docs/assets`. The illustrated terminal in the hero is a presentation, not an interactive agent.
 
-GitHub Pages publishes automatically from `main` website changes and public releases using `.github/workflows/website.yml`. Public URL: https://01ny-yzx.github.io/horizon-harness/ .
+GitHub Pages publishes automatically from `main` website changes and public releases using `.github/workflows/website.yml`. Public URL: https://01ny.club/ .

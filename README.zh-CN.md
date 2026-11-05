@@ -4,7 +4,7 @@
 
 终端里的 AI 助手。
 
-[English](README.md) · [简体中文](README.zh-CN.md) · [官网](https://01ny-yzx.github.io/horizon-harness/)
+[English](README.md) · [简体中文](README.zh-CN.md) · [官网](https://01ny.club/)
 
 </div>
 
@@ -22,7 +22,7 @@
 
 ```sh
 # 直接安装（macOS）
-curl -fsSL https://github.com/01ny-yzx/horizon-harness/releases/latest/download/install.sh | sh
+curl -fsSL https://01ny.club/install | sh
 
 # 软件包管理器（任选一种）
 npm i -g horizon-harness@latest       # macOS / Windows x64，需要 Node.js 18+

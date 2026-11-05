@@ -4,7 +4,7 @@
 
 An AI agent for your terminal.
 
-[English](README.md) · [简体中文](README.zh-CN.md) · [Website](https://01ny-yzx.github.io/horizon-harness/)
+[English](README.md) · [简体中文](README.zh-CN.md) · [Website](https://01ny.club/)
 
 </div>
 
@@ -22,7 +22,7 @@ An AI agent for your terminal.
 
 ```sh
 # Direct install (macOS)
-curl -fsSL https://github.com/01ny-yzx/horizon-harness/releases/latest/download/install.sh | sh
+curl -fsSL https://01ny.club/install | sh
 
 # Package managers (choose one)
 npm i -g horizon-harness@latest       # macOS / Windows x64, requires Node.js 18+
