@@ -116,6 +116,12 @@ class DeletionStorage(unittest.TestCase):
 
 
 class DeletionTerminal(unittest.IsolatedAsyncioTestCase):
+    async def wait_for_ui(self, pilot, predicate, description):
+        deadline = asyncio.get_running_loop().time() + 15
+        while not predicate():
+            self.assertLess(asyncio.get_running_loop().time(), deadline, description)
+            await pilot.pause(.03)
+
     async def test_default_cancel_and_confirm_current_session_delete(self):
         from scripts.smoke_tui_session_tabs import TabClient
         from tui.app import HorizonApp
@@ -183,6 +189,10 @@ class DeletionTerminal(unittest.IsolatedAsyncioTestCase):
         from tui.i18n import Preferences
         from tui.session_history import SessionHistoryPicker
         class Client(TabClient):
+            restore_delay = 0
+            async def context(self, sid):
+                await asyncio.sleep(self.restore_delay)
+                return await super().context(sid)
             async def delete_session(self, sid):
                 self.rows = [row for row in self.rows if row['id'] != sid]
                 return {'id': sid, 'deleted': True}
@@ -207,25 +217,26 @@ class DeletionTerminal(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(app.session_id, 'ses_a')
                 self.assertNotIn('ses_b', app._session_tabs)
                 self.assertEqual([row['id'] for row in client.rows], ['ses_a'])
+            client.restore_delay = .4
             reopened = HorizonApp(client, preferences=prefs)
             async with reopened.run_test(size=(100, 32)) as pilot:
-                await pilot.pause(.15)
+                await self.wait_for_ui(pilot, lambda: reopened.session_id == 'ses_a' and not reopened._navigation_blocked(),
+                                       'Restarted session must finish restoring before navigation')
                 self.assertEqual(list(reopened._session_tabs), ['ses_a'])
                 self.assertEqual(reopened.session_id, 'ses_a')
                 await reopened.action_history()
                 await pilot.pause()
+                self.assertIsInstance(reopened.screen, SessionHistoryPicker)
                 await pilot.press('delete')
-                await pilot.pause()
+                await self.wait_for_ui(pilot, lambda: getattr(reopened.focused, 'id', None) == 'session-delete-cancel',
+                                       'Confirmation must be mounted with safe default focus')
                 await pilot.press('right')
-                await pilot.pause()
+                await self.wait_for_ui(pilot, lambda: getattr(reopened.focused, 'id', None) == 'session-delete-yes',
+                                       'Delete must be selected before confirmation')
                 await pilot.press('enter')
-                # Wait for the asynchronous deletion and replacement picker, not a fixed CI delay.
-                for _ in range(100):
-                    await pilot.pause(.05)
-                    if (not reopened._session_tabs
-                            and isinstance(reopened.screen, SessionHistoryPicker)
-                            and reopened.screen.rows == []):
-                        break
+                await self.wait_for_ui(pilot, lambda: not reopened._session_tabs
+                                       and isinstance(reopened.screen, SessionHistoryPicker) and reopened.screen.rows == [],
+                                       'Deleted session must disappear from tabs and history')
                 self.assertEqual(reopened._session_tabs, {})
                 self.assertIsNone(reopened.session_id)
                 self.assertEqual(reopened.screen.rows, [])
