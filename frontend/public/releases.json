@@ -1,5 +1,83 @@
 [
   {
+    "tag_name": "v1.0.4",
+    "html_url": "https://github.com/01ny-yzx/horizon-harness/releases/tag/v1.0.4",
+    "published_at": "2026-11-05T10:59:40Z",
+    "body": "## What's new\n\n- Fix Windows npm update file locks by keeping native runtimes outside the replaceable npm package, isolated by version, platform and checksum.\n- Stop the owned local service process tree on exit so bundled Python tools do not keep runtime files open.\n- Re-read the installed package version after an npm update, validate the runtime receipt, and retain npm channel detection for cached binaries.\n- Verify native installation and package replacement while an interpreter is running on Windows x64, macOS Apple Silicon and macOS Intel.\n- Update the TUI version indicator and website release history to v1.0.4.\n\nSettings, API keys and sessions stay in their existing user data directory.\n\n## 更新内容\n\n- 修复 Windows 通过 npm 更新时运行文件被占用的问题：运行文件移出 npm 安装目录，按版本、平台和校验值独立保存。\n- 退出时清理本地服务及其子进程，减少后台 Python 工具继续占用文件的情况。\n- npm 更新后重新读取版本并校验安装回执，缓存中的程序仍能识别 npm 安装渠道。\n- 在 Windows x64、Mac Apple Silicon、Mac Intel 上验证安装及运行期间替换 npm 目录。\n- TUI 版本号、官网历史版本更新为 v1.0.4。\n\n配置、API Key 和历史会话仍保存在原有用户数据目录。\n\n### Update / 更新\n\n```sh\nnpm install -g horizon-harness@1.0.4\n```\n\n```sh\nbrew update && brew upgrade 01ny-yzx/tap/horizon\n```\n\nWindows users upgrading from v1.0.3 or earlier should close all Horizon windows before updating manually. If EBUSY persists, restart Windows and run the npm command before opening Horizon. The old updater cannot gain this fix until the new version is installed.\n\nWindows 从 v1.0.3 或更早版本升级时，请先关闭全部 Horizon 窗口，再手动运行 npm 更新命令；若仍提示 EBUSY，重启 Windows 后先更新再启动。新版修复需要安装完成后才会生效。\n\nWebsite / 官网：https://01ny-yzx.github.io/horizon-harness/\n",
+    "assets": [
+      {
+        "name": "horizon-1.0.4-macos-arm64.tar.gz",
+        "size": 27164586,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.4/horizon-1.0.4-macos-arm64.tar.gz"
+      },
+      {
+        "name": "horizon-1.0.4-macos-arm64.tar.gz.build.json",
+        "size": 209,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.4/horizon-1.0.4-macos-arm64.tar.gz.build.json"
+      },
+      {
+        "name": "horizon-1.0.4-macos-arm64.tar.gz.sha256",
+        "size": 99,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.4/horizon-1.0.4-macos-arm64.tar.gz.sha256"
+      },
+      {
+        "name": "horizon-1.0.4-macos-x64.tar.gz",
+        "size": 28040315,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.4/horizon-1.0.4-macos-x64.tar.gz"
+      },
+      {
+        "name": "horizon-1.0.4-macos-x64.tar.gz.build.json",
+        "size": 206,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.4/horizon-1.0.4-macos-x64.tar.gz.build.json"
+      },
+      {
+        "name": "horizon-1.0.4-macos-x64.tar.gz.sha256",
+        "size": 97,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.4/horizon-1.0.4-macos-x64.tar.gz.sha256"
+      },
+      {
+        "name": "horizon-1.0.4-source.zip",
+        "size": 4945976,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.4/horizon-1.0.4-source.zip"
+      },
+      {
+        "name": "horizon-1.0.4-windows-x64.zip",
+        "size": 28301135,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.4/horizon-1.0.4-windows-x64.zip"
+      },
+      {
+        "name": "horizon-1.0.4-windows-x64.zip.build.json",
+        "size": 185,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.4/horizon-1.0.4-windows-x64.zip.build.json"
+      },
+      {
+        "name": "horizon-1.0.4-windows-x64.zip.sha256",
+        "size": 97,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.4/horizon-1.0.4-windows-x64.zip.sha256"
+      },
+      {
+        "name": "horizon-harness-1.0.4.tgz",
+        "size": 6848,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.4/horizon-harness-1.0.4.tgz"
+      },
+      {
+        "name": "horizon.rb",
+        "size": 949,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.4/horizon.rb"
+      },
+      {
+        "name": "install.sh",
+        "size": 3927,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.4/install.sh"
+      },
+      {
+        "name": "release-manifest.json",
+        "size": 848,
+        "browser_download_url": "https://github.com/01ny-yzx/horizon-harness/releases/download/v1.0.4/release-manifest.json"
+      }
+    ]
+  },
+  {
     "tag_name": "v1.0.3",
     "html_url": "https://github.com/01ny-yzx/horizon-harness/releases/tag/v1.0.3",
     "published_at": "2026-11-04T19:37:09Z",
